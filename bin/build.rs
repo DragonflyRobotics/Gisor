@@ -48,23 +48,57 @@ fn main() {
     for entry in test_files {
         let path = entry.unwrap().path();
         println!("cargo:rerun-if-changed={}", path.display());
-        let status = Command::new("gcc")
+        let mut status = Command::new("nvcc")
+            .arg("-c")
             .arg(&path)
-            .arg("-I")
-            .arg(&cuda_include)
-            .arg("-L")
-            .arg(&cuda_lib64)
-            .arg("-L")
-            .arg(&target_path)
-            .arg("-lgisor")
-            .arg("-lcudart")
+            .arg("-o")
             .arg(format!(
-                "-oout/{}.o",
+                "out/{}.o",
+                path.file_stem().unwrap().to_str().unwrap()
+            ))
+            .arg("--compiler-options")
+            .arg("-fPIC")
+            .status()
+            .unwrap();
+
+        if !status.success() {
+            panic!("Compilation failed for {}", path.display());
+        }
+        status = Command::new("nvcc")
+                    .arg("-ptx")
+                    .arg(&path)
+                    .arg("-o")
+                    .arg(format!(
+                        "out/{}.ptx",
+                        path.file_stem().unwrap().to_str().unwrap()
+                    ))
+                    .arg("--compiler-options")
+                    .arg("-fPIC")
+                    .status()
+                    .unwrap();
+        
+                if !status.success() {
+                    panic!("Compilation failed for {}", path.display());
+                }
+        status = Command::new("g++")
+            .arg(format!(
+                "out/{}.o",
+                path.file_stem().unwrap().to_str().unwrap()
+            ))
+            .arg("-L")
+            .arg(target_path.to_str().unwrap())
+            .arg("-L")
+            .arg(cuda_lib64.as_str())
+            .arg("-lgisor")
+            // .arg("-lcudart")
+            .arg("-o")
+            .arg(format!(
+                "out/{}.run",
                 path.file_stem().unwrap().to_str().unwrap()
             ))
             .status()
             .unwrap();
-
+        fs::remove_file(format!("out/{}.o", path.file_stem().unwrap().to_str().unwrap())).ok();
         if !status.success() {
             panic!("Compilation failed for {}", path.display());
         }

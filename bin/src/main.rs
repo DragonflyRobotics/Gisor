@@ -9,8 +9,13 @@ fn main() {
     println!("Running all tests with emulator :)");
     // print current directory
     let binary_path: PathBuf = env::current_dir().unwrap().join("bin").join("out");
+    println!("Binary path: {:?}", binary_path);
+    unsafe { env::set_var("GISOR_PTX_PTR", "wass goodie gang") };
     for binary in binary_path.read_dir().unwrap() {
         let binary = binary.unwrap();
+        if !binary.file_name().to_str().unwrap().ends_with(".run") {
+            continue;
+        }
         println!(
             "=============================={}=============================",
             binary.file_name().to_str().unwrap()

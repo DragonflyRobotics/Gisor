@@ -2,7 +2,7 @@
 members = [
     "crates/gisor",
     "bin"
-]
+, "crates/nvtypes", "crates/memory", "crates/warp", "crates/streaming_multiprocessor"]
 resolver = "3"
 
 
