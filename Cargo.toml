@@ -1,6 +1,9 @@
-[package]
-name = "Gisor"
-version = "0.1.0"
-edition = "2024"
+[workspace]
+members = [
+    "crates/gisor",
+    "bin"
+]
+resolver = "3"
 
-[dependencies]
+
+[workspace.dependencies]

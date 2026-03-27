@@ -1,0 +1,13 @@
+[package]
+name = "bin"
+version = "0.1.0"
+edition = "2024"
+build = "build.rs"
+
+[dependencies]
+gisor = { path = "../crates/gisor" }
+
+
+[build-dependencies]
+cc = "1.2.57"
+
