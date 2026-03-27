@@ -8,3 +8,9 @@ crate-type = ["cdylib"]
 
 
 [dependencies]
+nvtypes = { path = "../nvtypes" }
+memory = { path = "../memory" }
+warp = { path = "../warp" }
+streaming_multiprocessor = { path = "../streaming_multiprocessor" }
+
+
