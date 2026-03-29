@@ -1,4 +1,7 @@
-use std::{env, os::raw::{c_int, c_void}};
+use std::{
+    env,
+    os::raw::{c_int, c_void},
+};
 
 use nvtypes::{CudaError, cudaStream_t, dim3};
 
@@ -32,34 +35,51 @@ pub unsafe extern "C" fn __cudaLaunchKernel(
     CudaError::Success
 }
 
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn __cudaPushCallConfiguration() {
+    println!("__cudaPushCallConfiguration called")
+}
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn __cudaPushCallConfiguration() {println!("__cudaPushCallConfiguration called")}
+pub unsafe extern "C" fn __cudaUnregisterBinaryUtil() {
+    println!("__cudaUnregisterBinaryUtil called")
+}
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn __cudaUnregisterBinaryUtil() {println!("__cudaUnregisterBinaryUtil called")}
+pub unsafe extern "C" fn __cudaRegisterFatBinary() {
+    println!("__cudaRegisterFatBinary called")
+}
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn __cudaRegisterFatBinary() {println!("__cudaRegisterFatBinary called")}
-
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn __cudaRegisterFatBinaryEnd() {println!("__cudaRegisterFatBinaryEnd called");
+pub unsafe extern "C" fn __cudaRegisterFatBinaryEnd() {
+    println!("__cudaRegisterFatBinaryEnd called");
     unsafe {
-        let test = env::var("GISOR_PTX_PTR").unwrap_or_default();
-        println!("__cudaRegisterFatBinaryEnd called, GISOR_PTX_PTR={}", test);
-    }}
+        let test = env::var("GISOR_PTX").unwrap();
+        println!("__cudaRegisterFatBinaryEnd called, GISOR_PTX={}", test);
+    }
+}
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn __cudaUnregisterFatBinary() {println!("__cudaUnregisterFatBinary called")}
+pub unsafe extern "C" fn __cudaUnregisterFatBinary() {
+    println!("__cudaUnregisterFatBinary called")
+}
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn __cudaRegisterFunction() {println!("__cudaRegisterFunction called")}
+pub unsafe extern "C" fn __cudaRegisterFunction() {
+    println!("__cudaRegisterFunction called")
+}
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn __cudaPopCallConfiguration() {println!("__cudaPopCallConfiguration called")}
+pub unsafe extern "C" fn __cudaPopCallConfiguration() {
+    println!("__cudaPopCallConfiguration called")
+}
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn __cudaInitModule() {println!("__cudaInitModule called")}
+pub unsafe extern "C" fn __cudaInitModule() {
+    println!("__cudaInitModule called")
+}
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn __cudaGetKernel() {println!("__cudaGetKernel called")}
+pub unsafe extern "C" fn __cudaGetKernel() {
+    println!("__cudaGetKernel called")
+}

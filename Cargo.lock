@@ -3,14 +3,6 @@
 version = 4
 
 [[package]]
-name = "bin"
-version = "0.1.0"
-dependencies = [
- "cc",
- "gisor",
-]
-
-[[package]]
 name = "cc"
 version = "1.2.57"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -37,6 +29,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "gisor_launch"
+version = "0.1.0"
+dependencies = [
+ "gisor",
+]
+
+[[package]]
 name = "memory"
 version = "0.1.0"
 
@@ -55,8 +54,20 @@ name = "streaming_multiprocessor"
 version = "0.1.0"
 
 [[package]]
+name = "tests"
+version = "0.1.0"
+dependencies = [
+ "cc",
+ "gisor",
+]
+
+[[package]]
 name = "warp"
 version = "0.1.0"
 dependencies = [
  "streaming_multiprocessor",
 ]
+
+[[package]]
+name = "xtask"
+version = "0.1.0"

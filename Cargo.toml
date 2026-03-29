@@ -1,8 +1,8 @@
 [workspace]
 members = [
     "crates/gisor",
-    "bin"
-, "crates/nvtypes", "crates/memory", "crates/warp", "crates/streaming_multiprocessor"]
+    "crates/tests"
+, "crates/nvtypes", "crates/memory", "crates/warp", "crates/streaming_multiprocessor", "crates/gisor_launch", "xtask"]
 resolver = "3"
 
 
