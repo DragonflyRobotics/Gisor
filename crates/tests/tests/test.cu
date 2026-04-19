@@ -1,17 +1,29 @@
-#include <stdio.h>
-#include <stdint.h> // for uintptr_t
 #include <cuda_runtime.h>
+#include <stdio.h>
 
 int main() {
-    size_t size = 1024;
-    void* ptr = NULL;
-    cudaError_t err = cudaMalloc(&ptr, size);
-
-    if (!ptr) {
-        printf("Got null pointer!\n");
-    } else {
-        printf("Allocated memory at %p\n", ptr);
-    }
-
-    return 0;
+  int hostarr[10] = {};
+  for (int i = 0; i < 10; i++) {
+    hostarr[i] = i;
+  }
+  
+  for (int i = 0; i < 10; i++) {
+    printf("Host %d\n", hostarr[i]);
+  }
+  printf("\n");
+  
+  int *devarr = nullptr;
+  cudaMalloc(&devarr, 10 * sizeof(int));
+  cudaMemcpy(devarr, hostarr, 10 * sizeof(int), cudaMemcpyHostToDevice);
+  
+  int finalarr[10] = {};
+  cudaMemcpy(finalarr, devarr, 10 * sizeof(int), cudaMemcpyDeviceToHost);
+  for (int i = 0; i < 10; i++) {
+    printf("Final %d\n", finalarr[i]);
+  }
+  printf("\n");
+  
+  cudaFree(devarr);
+  
+  return 0;
 }

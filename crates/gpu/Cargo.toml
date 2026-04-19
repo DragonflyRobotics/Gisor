@@ -1,0 +1,10 @@
+[package]
+name = "gpu"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+memory = { path = "../memory" }
+nvtypes = { path = "../nvtypes" }
+once_cell = "1.21.4"
+utils = { path = "../utils" }

@@ -12,8 +12,10 @@ all:
 run:
 	@echo "Running..."
 	@echo "Runfile: $(RUNFILE), PTX file: $(PTX_FILE)"
+	cargo build
 	cargo run -p xtask -- launch -- $(RUNFILE) $(PTX_FILE)
 run_release:
+	cargo build --release
 	cargo run -p xtask -- launch --release -- $(RUNFILE) $(PTX_FILE)
 build:
 	cargo build

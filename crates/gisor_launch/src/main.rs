@@ -14,7 +14,7 @@ fn main() {
     let ptx = fs::read_to_string(ptx_file).ok().unwrap();
     unsafe { env::set_var("GISOR_PTX", ptx) };
     let ld_path = std::env::current_exe().unwrap();
-    let mut output = Command::new(format!("{}", run_file))
+    let mut output = match Command::new(format!("{}", run_file))
         .env(
             "LD_PRELOAD",
             ld_path
@@ -27,7 +27,10 @@ fn main() {
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .expect("failed to execute process");
+    {
+        Ok(child) => child,
+        Err(e) => panic!("failed to execute process: {}", e),
+    };
     if let Some(stdout) = output.stdout.take() {
         let reader = BufReader::new(stdout);
         for line in reader.lines() {

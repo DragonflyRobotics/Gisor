@@ -67,6 +67,7 @@ fn main() {
         }
         status = Command::new("nvcc")
                     .arg("-ptx")
+                    .arg("-O0")
                     .arg(&path)
                     .arg("-o")
                     .arg(format!(
@@ -90,8 +91,9 @@ fn main() {
             .arg(target_path.to_str().unwrap())
             .arg("-L")
             .arg(cuda_lib64.as_str())
-            // .arg("-lgisor")
-            .arg("-lcudart")
+            .arg("-lgisor")
+            // .arg("-lcuda")
+            // .arg("-lcudart")
             .arg("-o")
             .arg(format!(
                 "out/{}.run",

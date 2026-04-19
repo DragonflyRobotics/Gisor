@@ -4,7 +4,6 @@ use std::{
     path::PathBuf,
     process::{Command, Stdio},
 };
-use gisor::cudaFree;
 
 fn main() {
     println!("Running all tests with emulator :)");

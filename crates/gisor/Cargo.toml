@@ -9,8 +9,6 @@ crate-type = ["rlib", "cdylib"]
 
 [dependencies]
 nvtypes = { path = "../nvtypes" }
+gpu = { path = "../gpu" }
 memory = { path = "../memory" }
-warp = { path = "../warp" }
-streaming_multiprocessor = { path = "../streaming_multiprocessor" }
-
-
+cpp_demangle = "0.5.1"
