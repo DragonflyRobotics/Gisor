@@ -2,8 +2,5 @@
 members = [
     "crates/gisor",
     "crates/tests"
-, "crates/nvtypes", "crates/memory", "crates/warp", "crates/streaming_multiprocessor", "crates/gisor_launch", "xtask", "execute"]
+, "crates/nvtypes", "crates/gisor_launch", "xtask", "crates/memory", "crates/utils", "crates/gpu" , "crates/warp_scheduler"]
 resolver = "3"
-
-
-[workspace.dependencies]

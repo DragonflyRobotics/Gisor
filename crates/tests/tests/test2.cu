@@ -1,37 +1,59 @@
 #include <stdio.h>
 #include <cuda_runtime.h>
 
-__global__ void set_value(int *d, int value) {
-    int idx = threadIdx.x + blockIdx.x * blockDim.x;
-    d[idx] = value;
+__global__ void add(const float *a, const float *b, float *c, int n)
+{
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i < n) {
+        c[i] = a[i] + b[i] + 2;
+    }
 }
 
-int main() {
-    size_t N = 32;  // small array for demo
-    int *d_ptr = NULL;
+int main()
+{
+    const int n = 1024;
+    const int bytes = n * sizeof(float);
 
-    // Allocate memory on GPU
-    cudaError_t err = cudaMalloc((void**)&d_ptr, N * sizeof(int));
-    // if (err != cudaSuccess) {
-    //     printf("cudaMalloc failed: %s\n", cudaGetErrorString(err));
-    //     return 1;
-    // }
-    // printf("Allocated %zu bytes at %p on GPU\n", N * sizeof(int), d_ptr);
+    float *h_a = (float*)malloc(bytes);
+    float *h_b = (float*)malloc(bytes);
+    float *h_c = (float*)malloc(bytes);
 
-    // Launch kernel to set all elements to 42
-    set_value<<<1, N>>>(d_ptr, 42);
-    // cudaDeviceSynchronize();  // wait for kernel to finish
+    // init
+    for (int i = 0; i < n; i++) {
+        h_a[i] = i;
+        h_b[i] = 2.0f * i;
+    }
 
-    // // Copy data back to host
-    // int h_data[N];
-    // cudaMemcpy(h_data, d_ptr, N * sizeof(int), cudaMemcpyDeviceToHost);
+    float *d_a, *d_b, *d_c;
 
-    // // Print results
-    // for (int i = 0; i < N; i++) {
-    //     printf("h_data[%d] = %d\n", i, h_data[i]);
-    // }
+    cudaMalloc(&d_a, bytes);
+    cudaMalloc(&d_b, bytes);
+    cudaMalloc(&d_c, bytes);
 
-    // // Free GPU memory
-    // cudaFree(d_ptr);
+    cudaMemcpy(d_a, h_a, bytes, cudaMemcpyHostToDevice);
+    cudaMemcpy(d_b, h_b, bytes, cudaMemcpyHostToDevice);
+
+    int blockSize = 256;
+    int gridSize = (n + blockSize - 1) / blockSize;
+
+    add<<<gridSize, blockSize>>>(d_a, d_b, d_c, n);
+
+    cudaDeviceSynchronize();
+
+    cudaMemcpy(h_c, d_c, bytes, cudaMemcpyDeviceToHost);
+
+    // verify
+    for (int i = 0; i < 5; i++) {
+        printf("%f + %f = %f\n", h_a[i], h_b[i], h_c[i]);
+    }
+
+    cudaFree(d_a);
+    cudaFree(d_b);
+    cudaFree(d_c);
+
+    free(h_a);
+    free(h_b);
+    free(h_c);
+
     return 0;
 }
