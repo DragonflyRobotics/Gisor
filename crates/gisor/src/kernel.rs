@@ -7,6 +7,7 @@ use cpp_demangle::Symbol;
 use gpu::basegpu::{BasicGPU, GPU0};
 use nvtypes::{CUresult, CUstream, dim3, uint3};
 
+
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn __cudaLaunchKernel(
     kernel: *mut c_void,
@@ -100,6 +101,7 @@ pub unsafe extern "C" fn __cudaPushCallConfiguration(
     );
     let mut gpu = GPU0.lock().unwrap();
     gpu.set_launch_params(gridDim, blockDim);
+
 
     0
 }

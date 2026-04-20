@@ -2,8 +2,8 @@ use nvtypes::dim3;
 
 #[derive(Default, Copy, Clone)]
 pub struct Thread {
-    grid_pos: dim3,
-    threads_pos: dim3,
+    pub grid_pos: dim3,
+    pub threads_pos: dim3,
 }
 
 impl Thread {

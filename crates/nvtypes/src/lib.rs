@@ -1,5 +1,7 @@
 use std::{ffi::c_void, os::raw::c_uint};
 
+use serde::{Deserialize, Serialize};
+
 #[repr(C)]
 #[derive(Debug)]
 pub enum CudaError {
@@ -50,7 +52,7 @@ impl std::fmt::Debug for uint3 {
 }
 
 #[repr(C)]
-#[derive(Default, Clone, Copy)]
+#[derive(Default, Clone, Copy, Serialize, Deserialize)]
 pub struct dim3 {
     pub x: u32,
     pub y: u32,

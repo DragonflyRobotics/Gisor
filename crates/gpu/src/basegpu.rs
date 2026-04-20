@@ -1,14 +1,30 @@
 use std::{collections::HashMap, sync::Mutex};
 
+use csv::Writer;
 use memory::{Memory, MemoryAddress, MemoryElement};
 use nvtypes::dim3;
 use once_cell::sync::Lazy;
+use serde::Serialize;
 use utils::triple_zip;
 
 use crate::{
     sm::SM,
-    warp::{self, Warp, WarpState},
+    warp::{Warp, WarpState},
 };
+
+#[derive(Serialize)]
+struct ThreadRecord {
+    sm_id: usize,
+    warp_id: usize,
+    thread_id: usize,
+    grid_x: u32,
+    grid_y: u32,
+    grid_z: u32,
+    thread_x: u32,
+    thread_y: u32,
+    thread_z: u32,
+    warp_state: u8,
+}
 
 pub trait BasicGPU {
     fn malloc(&mut self, size: usize) -> (MemoryAddress, usize);
@@ -16,6 +32,7 @@ pub trait BasicGPU {
     fn load_ptx(&mut self, ptx: String);
     fn select_kernel(&mut self, kernel: String);
     fn set_launch_params(&mut self, grid: dim3, threads: dim3);
+    fn dump(&self, file_name: &str);
 }
 
 pub struct LaunchParams {
@@ -97,7 +114,33 @@ impl BasicGPU for GPU {
                 println!("No free warps available for block {:?}", block);
             }
         }
-        println!("GPU: {}\n", self);
+        // println!("{}", self);
+        self.dump("test.csv");
+    }
+
+    fn dump(&self, file_name: &str) {
+        let mut w = Writer::from_path(file_name).unwrap();
+
+        for (sm_idx, sm) in self.sms.iter().enumerate() {
+            for (warp_idx, warp) in sm.warps.iter().enumerate() {
+                for (thread_idx, thread) in warp.threads.iter().enumerate() {
+                    let record = ThreadRecord {
+                        sm_id: sm_idx,
+                        warp_id: warp_idx,
+                        thread_id: thread_idx,
+                        grid_x: thread.grid_pos.x,
+                        grid_y: thread.grid_pos.y,
+                        grid_z: thread.grid_pos.z,
+                        thread_x: thread.threads_pos.x,
+                        thread_y: thread.threads_pos.y,
+                        thread_z: thread.threads_pos.z,
+                        warp_state: warp.state as u8,
+                    };
+                    w.serialize(record).expect("Failed to write")
+                }
+            }
+        }
+        w.flush().expect("Failed to flush writer");
     }
 }
 
@@ -115,13 +158,7 @@ pub static GPU0: Lazy<Mutex<GPU>> = Lazy::new(|| {
         memory: Memory {
             data: HashMap::new(),
         },
-        sms: vec![
-            SM::new(10),
-            SM::new(10),
-            SM::new(10),
-            SM::new(10),
-            SM::new(10),
-        ],
+        sms: std::iter::repeat_with(|| SM::new(10)).take(5).collect(),
         kernel_symbol: None,
         launch_params: None,
         raw_ptx: None,

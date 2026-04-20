@@ -17,8 +17,8 @@ impl Default for WarpState {
 
 #[derive(Default, Clone, Copy)]
 pub struct Warp {
-    threads: [Thread; 32],
-    state: WarpState,
+    pub threads: [Thread; 32],
+    pub state: WarpState,
 }
 
 impl Warp {
