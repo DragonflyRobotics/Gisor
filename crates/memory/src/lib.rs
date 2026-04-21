@@ -1,29 +1,19 @@
 use rand::RngExt;
-use std::collections::HashMap;
+use std::{collections::HashMap, ops::Add};
 
 pub struct MemoryElement {
-    value: Vec<u8>,
+    pub value: u8,
 }
 
 impl MemoryElement {
-    pub fn new_empty(count: usize) -> Self {
-        Self { value: vec![0u8; count] }
+    pub fn new() -> Self {
+        Self { value: 0u8 }
     }
     
-    pub fn copy_in(&mut self, src: *const u8, count: usize) {
-        unsafe {
-            let bytes: Vec<u8> = std::slice::from_raw_parts(src as *const u8, count).to_vec();
-            self.value = bytes;
-        }
+    pub fn as_byte(&self) -> u8 {
+        self.value
     }
     
-    pub fn as_bytes(&self) -> &[u8] {
-        &self.value
-    }
-    
-    pub fn get_ints(&self) -> Vec<i32> {
-        self.value.chunks_exact(4).map(|b| i32::from_le_bytes([b[0], b[1], b[2], b[3]])).collect()
-    }
 }
 
 impl std::fmt::Debug for MemoryElement {
@@ -36,6 +26,21 @@ impl std::fmt::Debug for MemoryElement {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct MemoryAddress {
     pub address: u64,
+}
+
+impl Add<u64> for MemoryAddress {
+    type Output = Self;
+
+    fn add(self, other: u64) -> Self::Output {
+        Self { address: self.address + other }
+    }
+}
+impl Add<usize> for MemoryAddress {
+    type Output = Self;
+
+    fn add(self, other: usize) -> Self::Output {
+        Self { address: self.address + other as u64 }
+    }
 }
 
 impl MemoryAddress {

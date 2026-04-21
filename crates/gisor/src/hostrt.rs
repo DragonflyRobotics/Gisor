@@ -1,9 +1,8 @@
-use std::ffi::c_void;
+use std::{ffi::c_void, os::raw::c_char};
 
 use gpu::basegpu::{BasicGPU, GPU0};
 use memory::MemoryAddress;
 use nvtypes::{CUmemcpyKind, CUresult};
-
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn cudaSetDevice(device: i32) -> CUresult {
@@ -33,21 +32,26 @@ pub unsafe extern "C" fn cudaMemcpy(
             let mut gpu = GPU0.lock().unwrap();
             let gpu_loc = MemoryAddress::from_address(dst as usize as u64);
             println!("gpu_loc: {:x}", gpu_loc.address);
-            let data = gpu.memory.data.get_mut(&gpu_loc).unwrap();
-            data.copy_in(src as *const u8, count);
-            println!(
-                "Currently in GPU: {:?}",
-                gpu.memory.data.get(&gpu_loc).unwrap().get_ints()
-            );
+            for i in 0..count {
+                let byte = unsafe { *(src.add(i) as *const c_char) };
+                let temp_loc = gpu_loc + i;
+                if let Some(val) = gpu.memory.data.get_mut(&temp_loc) {
+                    val.value = byte as u8;
+                }
+            }
         }
         CUmemcpyKind::DeviceToHost => {
             println!("cudaMemcpy: kind = DeviceToHost");
             let mut gpu = GPU0.lock().unwrap();
             let gpu_loc = MemoryAddress::from_address(src as usize as u64);
-            let data = gpu.memory.data.get_mut(&gpu_loc).unwrap();
             
-            unsafe {
-                std::ptr::copy_nonoverlapping(data.as_bytes().as_ptr(), dst as *mut u8, count);
+            for i in 0..count {
+                let temp_loc = gpu_loc + i;
+                if let Some(val) = gpu.memory.data.get_mut(&temp_loc) {
+                    unsafe {
+                        *(dst.add(i) as *mut u8) = val.value;
+                    }
+                }
             }
         }
         CUmemcpyKind::DeviceToDevice => {
