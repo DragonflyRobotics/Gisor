@@ -1,16 +1,19 @@
 use nvtypes::dim3;
+use crate::execute_unit::execute_unit;
 
-#[derive(Default, Copy, Clone)]
+#[derive(Default, Clone)]
 pub struct Thread {
     pub grid_pos: dim3,
     pub threads_pos: dim3,
+    pub execute_unit: execute_unit,
 }
 
 impl Thread {
-    pub fn new() -> Self {
+    pub fn new(memory_size: usize) -> Self {
         Self {
             grid_pos: dim3 { x: 0, y: 0, z: 0 },
             threads_pos: dim3 { x: 0, y: 0, z: 0 },
+            execute_unit: execute_unit::new(memory_size),
         }
     }
     
