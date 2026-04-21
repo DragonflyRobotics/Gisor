@@ -51,9 +51,11 @@ pub struct GPU {
 impl BasicGPU for GPU {
     fn malloc(&mut self, size: usize) -> (MemoryAddress, usize) {
         let addr = MemoryAddress::new();
-        self.memory
-            .data
-            .insert(addr, MemoryElement::new_empty(size));
+        for offset in 0..size {
+            self.memory
+                .data
+                .insert(addr + offset, MemoryElement::new());
+        }
         (addr, size)
     }
 

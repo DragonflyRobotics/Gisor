@@ -5,6 +5,7 @@ use std::{
 
 use cpp_demangle::Symbol;
 use gpu::basegpu::{BasicGPU, GPU0};
+use memory::MemoryAddress;
 use nvtypes::{CUresult, CUstream, dim3, uint3};
 
 
@@ -22,6 +23,19 @@ pub unsafe extern "C" fn __cudaLaunchKernel(
         "gridDim: {:?}, blockDim: {:?}, args: {:?}, sharedMemBytes: {}",
         gridDim, blockDim, args, sharedMemBytes
     );
+    unsafe {
+        let d_a = *(*(args.offset(0)) as *const u64);
+        let d_b = *(*(args.offset(1)) as *const u64);
+        let d_c = *(*(args.offset(2)) as *const u64);
+        let n = *(*(args.offset(3)) as *const i32);
+        
+        println!("+++ Kernel arguments:");
+        println!("+++   d_a = 0x{:x}", d_a);
+        println!("+++   d_b = 0x{:x}", d_b);
+        println!("+++   d_c = 0x{:x}", d_c);
+        println!("+++   n = {}", n);
+        
+    }
     0
 }
 
