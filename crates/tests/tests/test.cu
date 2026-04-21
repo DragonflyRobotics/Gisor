@@ -20,6 +20,9 @@ int main() {
   cudaMemcpy(finalarr, devarr, 10 * sizeof(int), cudaMemcpyDeviceToHost);
   for (int i = 0; i < 10; i++) {
     printf("Final %d\n", finalarr[i]);
+    if (finalarr[i] != i) {
+        return 1;
+    }
   }
   printf("\n");
   
