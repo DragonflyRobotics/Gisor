@@ -13,7 +13,7 @@ impl Thread {
         Self {
             grid_pos: dim3 { x: 0, y: 0, z: 0 },
             threads_pos: dim3 { x: 0, y: 0, z: 0 },
-            execute_unit: execute_unit::new(memory_size),
+            execute_unit: execute_unit::new(),
         }
     }
     

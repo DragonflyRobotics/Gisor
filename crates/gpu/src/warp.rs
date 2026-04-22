@@ -15,20 +15,20 @@ impl Default for WarpState {
     }
 }
 
-#[derive(Default, Clone, Copy)]
+#[derive(Default, Clone)]
 pub struct Warp {
-    pub threads: [Thread; 32],
+    pub threads: Vec<Thread>,
     pub state: WarpState,
 }
 
 impl Warp {
     pub fn new() -> Self {
         Self {
-            threads: [Thread::default(); 32],
+            threads: std::iter::repeat_with(Thread::default).take(32).collect::<Vec<_>>(),
             state: WarpState::default(),
         }
     }
-    
+
     pub fn is_occupied(&self) -> bool {
         self.state != WarpState::InActive
     }
