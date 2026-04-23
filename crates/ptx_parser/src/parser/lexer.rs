@@ -1,4 +1,3 @@
-
 use logos::Logos; //used for fast tokenization
 
 ///span of token
@@ -11,48 +10,27 @@ pub type Span = std::ops::Range<usize>;
 #[logos(skip r"/\*([^*]|\*[^/])*\*/")]
 pub enum Token {
     //punctuation
-    #[token(",")]
-    Comma,
-
-    #[token(";")]
-    Semicolon,
-
-    #[token(":")]
-    Colon,
-
-    #[token("(")]
-    LParen,
-
-    #[token(")")]
-    RParen,
-
-    #[token("{")]
-    LBrace,
-
-    #[token("}")]
-    RBrace,
-
-    #[token("[")]
-    LBracket,
-
-    #[token("]")]
-    RBracket,
+    #[token(",")] Comma,
+    #[token(";")] Semicolon,
+    #[token(":")] Colon,
+    #[token("(")] LParen,
+    #[token(")")] RParen,
+    #[token("{")] LBrace,
+    #[token("}")] RBrace,
+    #[token("[")] LBracket,
+    #[token("]")] RBracket,
 
     //prefix symbols
     ///prefix for regs
-    #[token("%")]
-    Percent,
+    #[token("%")] Percent,
 
     ///prefix for predicate guard
-    #[token("@")]
-    At,
+    #[token("@")] At,
 
-    #[token("@!")]
-    AtNot,
+    #[token("@!")] AtNot,
 
     ///for opcode modifiers and prefixes
-    #[token(".")]
-    Dot,
+    #[token(".")] Dot,
 
     ///PTX label starts with $ followed by id chars
     #[regex(r"\$[A-Za-z_][A-Za-z0-9_]*", |lex| lex.slice().to_string())]

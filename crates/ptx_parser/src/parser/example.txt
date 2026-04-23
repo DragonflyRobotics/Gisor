@@ -1,1 +1,1 @@
-doStuff(float*, const int*, unsigned long long, int32_t)
+collatz(int *, int)
