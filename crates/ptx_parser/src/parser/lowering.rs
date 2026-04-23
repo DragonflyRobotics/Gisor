@@ -1017,3 +1017,80 @@ fn format_opcode(raw: &RawInstruction) -> String {
     let mods: String = raw.modifiers.iter().map(|m| format!(".{m}")).collect();
     format!("{}{}", raw.mnemonic, mods)
 }
+// ----------------------------------------------------------------------------
+// Tests
+// ----------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn float_immediate_bit_pattern_preserved() {
+        // The bit pattern for 1.0f32 is 0x3F800000 = 1065353216.
+        // If `imm_to_usize` handles F32Bits correctly, then after lowering,
+        // args[1] of a mov.f32 should equal 0x3F800000.
+        // Then if the executor does `f32::from_bits(args[1] as u32)`, it
+        // should recover exactly 1.0.
+        let src = r#"
+            .visible .entry k()
+            {
+                mov.f32 %f1, 0f3F800000;
+                ret;
+            }
+        "#;
+        let out = crate::parser::parse(src).unwrap();
+        let mov = &out.instructions[0];
+
+        // Check the raw encoded value.
+        assert_eq!(
+            mov.args[1], 0x3F800000,
+            "float bits should round-trip as 0x3F800000"
+        );
+
+        // Check that reinterpretation produces 1.0.
+        let bits = mov.args[1] as u32;
+        let value = f32::from_bits(bits);
+        assert_eq!(value, 1.0_f32, "recovered value should be 1.0");
+    }
+
+    #[test]
+    fn float_immediate_negative_value() {
+        // -1.0f32 is 0xBF800000 = 3212836864. High bit is set, which is the
+        // scenario most likely to expose sign-extension bugs in usize conversion.
+        let src = r#"
+            .visible .entry k()
+            {
+                mov.f32 %f1, 0fBF800000;
+                ret;
+            }
+        "#;
+        let out = crate::parser::parse(src).unwrap();
+        let mov = &out.instructions[0];
+
+        assert_eq!(
+            mov.args[1] as u32,
+            0xBF800000,
+            "negative float bits should round-trip"
+        );
+
+        let value = f32::from_bits(mov.args[1] as u32);
+        assert_eq!(value, -1.0_f32);
+    }
+
+    #[test]
+    fn float_immediate_in_add_f32_imm() {
+        // Also test immediates in binary ops, not just mov.
+        // 2.5f32 = 0x40200000 = 1075838976.
+        let src = r#"
+            .visible .entry k()
+            {
+                add.f32 %f1, %f2, 0f40200000;
+                ret;
+            }
+        "#;
+        let out = crate::parser::parse(src).unwrap();
+        let add = &out.instructions[0];
+        // args = [dst, src_reg, imm_bits]
+        assert_eq!(add.args[2] as u32, 0x40200000);
+        assert_eq!(f32::from_bits(add.args[2] as u32), 2.5_f32);
+    }
+}

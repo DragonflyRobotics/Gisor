@@ -305,7 +305,7 @@ impl execute_unit {
         self.f[dst] = result;
          */
         // println!("{}", args[addr as usize] as f32);
-        self.f[dst] = args[addr as usize] as f32;
+        self.f[dst] = f32::from_bits(args[addr as usize] as u32);
     }
 
     fn mov_u32_tid_x(&mut self, dst: usize) {

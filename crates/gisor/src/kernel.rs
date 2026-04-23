@@ -55,7 +55,7 @@ pub unsafe extern "C" fn __cudaLaunchKernel(
                         args_vec.push(arg as usize);
                     },
                     ptx_parser::PtxType::F32 => {
-                        let arg = *(*(args.offset(i as isize)) as *const f32);
+                        let arg = *(*(args.offset(i as isize)) as *const u32);
                         args_vec.push(arg as usize);
                     },
                     ptx_parser::PtxType::B32 => {
