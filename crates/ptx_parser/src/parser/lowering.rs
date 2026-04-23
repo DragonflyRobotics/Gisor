@@ -113,6 +113,7 @@ fn lower_instruction(
         "fma" => lower_fma(raw),
         "add" => lower_add(raw),
         "sub" => lower_sub(raw),
+        "div" => lower_div(raw),
         "mul" => lower_mul(raw),
         "neg" => lower_neg(raw),
         "setp" => lower_setp(raw),
@@ -484,6 +485,21 @@ fn lower_sub(raw: &RawInstruction) -> Result<inst_info, ParseError> {
     }
 }
 
+fn lower_div(raw: &RawInstruction) -> Result<inst_info, ParseError> {
+    expect_operand_count(raw, 3)?;
+    match raw.modifiers.as_slice() {
+        [r, ty] if r == "rn" && ty == "f32" => {
+            let args = collect_three_regs(raw)?;
+            Ok(make_inst(InstType::DivRnF32, args))
+        }
+        _ => Err(ParseError::UnknownOpcode {
+            line: raw.line,
+            mnemonic: raw.mnemonic.clone(),
+            modifiers: raw.modifiers.clone(),
+        }),
+    }
+}
+
 /// `mul.f32 %d, %a, %b` or `mul.wide.s32 %rd, %r, <imm>`.
 ///
 /// Per the design note, `mul.wide.s32` always has an immediate third operand
@@ -547,6 +563,17 @@ fn lower_setp(raw: &RawInstruction) -> Result<inst_info, ParseError> {
             }
             RawOperand::Immediate(imm) => Ok(make_inst(
                 InstType::SetpGeS32Imm,
+                vec![p, a, imm_to_usize(*imm)],
+            )),
+            _ => Err(ParseError::UnsupportedOperandShape {
+                line: raw.line,
+                opcode: format_opcode(raw),
+                reason: "third operand of setp.ge.s32 must be register or immediate".to_string(),
+            }),
+        },
+        [cmp, ty] if cmp == "le" && ty == "f32" => match &raw.operands[2] {
+            RawOperand::Immediate(imm) => Ok(make_inst(
+                InstType::SetpLeF32Imm,
                 vec![p, a, imm_to_usize(*imm)],
             )),
             _ => Err(ParseError::UnsupportedOperandShape {
@@ -798,6 +825,11 @@ fn lower_cvt(raw: &RawInstruction) -> Result<inst_info, ParseError> {
             let d = reg_index(&raw.operands[0], raw.line)?;
             let s = reg_index(&raw.operands[1], raw.line)?;
             Ok(make_inst(InstType::CvtSatF32F32, vec![d, s]))
+        }
+        [m1, m2, m3] if m1 == "rn" && m2 == "f32" && m3 == "s32" => {
+            let d = reg_index(&raw.operands[0], raw.line)?;
+            let s = reg_index(&raw.operands[1], raw.line)?;
+            Ok(make_inst(InstType::CvtRnF32S32, vec![d, s]))
         }
         _ => Err(ParseError::UnknownOpcode {
             line: raw.line,
