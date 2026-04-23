@@ -46,6 +46,7 @@ pub enum InstType {
     LdGlobalU32,
     LdGlobalF32,
     LdGlobalNcF32,
+    StGlobalU32,
     StGlobalF32,
     SetpGeS32,
     SetpGeS32Imm,
@@ -56,4 +57,13 @@ pub enum InstType {
     BraIf,
     BraIfNot,
     Ret,
+    AndB32,
+    SetpEqB32,
+    XorPred,
+    NotPred,
+    ShrU32,
+    ShrS32,
+    MovPred,
+    MadLoS32Imm,
+    BraUni
 }
