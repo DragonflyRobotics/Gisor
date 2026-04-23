@@ -23,19 +23,28 @@ pub unsafe extern "C" fn __cudaLaunchKernel(
         "gridDim: {:?}, blockDim: {:?}, args: {:?}, sharedMemBytes: {}",
         gridDim, blockDim, args, sharedMemBytes
     );
+    let mut args_vec: Vec<usize> = vec![];
+    let mut gpu = GPU0.lock().unwrap();
     unsafe {
+        // for i in 0..gpu.num_args.unwrap() {
+        //     println!("Offset: {}", i as isize);
+        //     let arg = *(*(args.offset(i as isize)) as *const usize);
+        //     args_vec.push(arg);
+        // }
         let d_a = *(*(args.offset(0)) as *const u64);
         let d_b = *(*(args.offset(1)) as *const u64);
         let d_c = *(*(args.offset(2)) as *const u64);
         let n = *(*(args.offset(3)) as *const i32);
+        panic!("");
         
-        println!("+++ Kernel arguments:");
-        println!("+++   d_a = 0x{:x}", d_a);
-        println!("+++   d_b = 0x{:x}", d_b);
-        println!("+++   d_c = 0x{:x}", d_c);
-        println!("+++   n = {}", n);
+        // println!("+++ Kernel arguments:");
+        // println!("+++   d_a = 0x{:x}", d_a);
+        // println!("+++   d_b = 0x{:x}", d_b);
+        // println!("+++   d_c = 0x{:x}", d_c);
+        // println!("+++   n = {}", n);
         
     }
+    gpu.execute(args_vec);
     0
 }
 
@@ -67,13 +76,15 @@ pub unsafe extern "C" fn __cudaRegisterFunction(
         "__cudaRegisterFunction called with thread_limit: {}",
         thread_limit
     );
+    let mut gpu = GPU0.lock().unwrap();
     unsafe {
-        println!("Host function: {:?}", CStr::from_ptr(hostFun));
+        println!("Host function: {:?}", CStr::from_ptr(deviceFun));
         let sym = Symbol::new(CStr::from_ptr(deviceFun).to_str().unwrap()).unwrap();
         println!(
             "Device demangled function: {:?}",
             sym.demangle().unwrap().to_string()
         );
+        gpu.num_args = Some(4);
         // println!("TID: {:?}", *tid);
         // println!("BID: {:?}", *bid);
         // println!("Block Dim: {:?}", *bDim);

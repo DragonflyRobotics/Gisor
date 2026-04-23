@@ -5,10 +5,10 @@ use crate::inst_info::inst_info;
 
 #[derive(Clone)]
 pub struct execute_unit {
-    p: [bool; 256], // predicate registers
-    r: [u32; 256], // gen purpose regs
-    rd: [u64; 256], // double regs
-    f: [f32; 256], // floating point regs
+    pub p: [bool; 256], // predicate registers
+    pub r: [u32; 256], // gen purpose regs
+    pub rd: [u64; 256], // double regs
+    pub f: [f32; 256], // floating point regs
 
     tid_x: u32, // threadId.x
     tid_y: u32, // threadId.y
@@ -98,7 +98,7 @@ impl execute_unit {
         }
     }
 
-    fn set_execute_id(&mut self,
+    pub fn set_execute_id(&mut self,
                       // thread position within block
                       tid_x: u32, tid_y: u32, tid_z: u32,
                       // block position within grid
@@ -124,7 +124,7 @@ impl execute_unit {
         self.nctaid_z = nctaid_z;
     }
 
-    fn import_inst(&mut self, instructions: Vec<inst_info>) {
+    pub fn import_inst(&mut self, instructions: Vec<inst_info>) {
         self.inst_list = instructions;
         self.total_number_inst = self.inst_list.len() as u32;
         self.pc = 0;
@@ -216,7 +216,7 @@ impl execute_unit {
         self.execute_single_inst(inst);
     }
 
-    fn execute_all(&mut self) {
+    pub fn execute_all(&mut self) {
         self.pc = 0;                    // reset to start of instruction list
         self.branch_is_taken = false;   // clear branch flag
 
@@ -459,6 +459,7 @@ impl execute_unit {
         }
         let result = f32::from_le_bytes(bytes);
         self.f[dst] = result;
+        println!("LDGLOBALF32: res = {}", result);
     }
 
     fn ld_global_nc_f32(&mut self, dst: usize, addr: usize) {

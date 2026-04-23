@@ -6,10 +6,11 @@ use nvtypes::dim3;
 use once_cell::sync::Lazy;
 use serde::Serialize;
 use utils::triple_zip;
+use crate::inst_info::make_inst;
+use crate::inst_type::InstType;
 
 use crate::{
-    sm::SM,
-    warp::{Warp, WarpState},
+    inst_info::inst_info, sm::SM, warp::{Warp, WarpState}
 };
 
 #[derive(Serialize)]
@@ -33,6 +34,7 @@ pub trait BasicGPU {
     fn select_kernel(&mut self, kernel: String);
     fn set_launch_params(&mut self, grid: dim3, threads: dim3);
     fn dump(&self, file_name: &str);
+    fn execute(&mut self, args: Vec<usize>);
 }
 
 pub struct LaunchParams {
@@ -46,21 +48,24 @@ pub struct GPU {
     kernel_symbol: Option<String>,
     launch_params: Option<LaunchParams>,
     raw_ptx: Option<String>,
+    pub num_args: Option<usize>,
 }
 
 impl BasicGPU for GPU {
     fn malloc(&mut self, size: usize) -> (MemoryAddress, usize) {
         let addr = MemoryAddress::new();
         for offset in 0..size {
-            self.memory
-                .data
-                .insert(addr + offset, MemoryElement::new());
+            self.memory.data.insert(addr + offset, MemoryElement::new());
         }
+        self.memory.sizes.insert(addr, size);
         (addr, size)
     }
 
     fn free(&mut self, addr: MemoryAddress) {
-        self.memory.data.remove(&addr);
+        let size = self.memory.sizes.remove(&addr).unwrap();
+        for offset in 0..size {
+            self.memory.data.remove(&(addr + offset));
+        }
     }
 
     fn load_ptx(&mut self, ptx: String) {
@@ -144,6 +149,38 @@ impl BasicGPU for GPU {
         }
         w.flush().expect("Failed to flush writer");
     }
+
+    fn execute(&mut self, args: Vec<usize>) {
+        let mut insts: Vec<inst_info> = vec![];
+        insts.push(make_inst(InstType::LdParamU64, vec![1, args[0]])); // dst=rd1, addr=0x1000
+        insts.push(make_inst(InstType::CvtaToGlobal, vec![4, 1])); // dst=rd4, src=rd1
+        insts.push(make_inst(InstType::MulWideS32, vec![5, 1, 4])); // dst=rd5, src1=r1, imm=4
+        insts.push(make_inst(InstType::AddS64, vec![6, 4, 5])); // dst=rd6, src1=rd4, src2=rd5
+        insts.push(make_inst(InstType::LdGlobalF32, vec![2, 6])); // dst=f2, addr_reg=rd6
+        self.num_args = Some(args.len());
+        for sm in self.sms.iter_mut() {
+            for warp in sm.warps.iter_mut() {
+                for thread in warp.threads.iter_mut() {
+                    thread.execute_unit.set_execute_id(
+                        thread.threads_pos.x,
+                        thread.threads_pos.y,
+                        thread.threads_pos.z,
+                        thread.grid_pos.x,
+                        thread.grid_pos.y,
+                        thread.grid_pos.z,
+                        self.launch_params.as_ref().unwrap().block.0,
+                        self.launch_params.as_ref().unwrap().block.1,
+                        self.launch_params.as_ref().unwrap().block.2,
+                        self.launch_params.as_ref().unwrap().grid.0,
+                        self.launch_params.as_ref().unwrap().grid.1,
+                        self.launch_params.as_ref().unwrap().grid.2,
+                    );
+                    thread.execute_unit.import_inst(insts.clone());
+                    thread.execute_unit.execute_all();
+                }
+            }
+        }
+    }
 }
 
 impl std::fmt::Display for GPU {
@@ -159,10 +196,12 @@ pub static GPU0: Lazy<Mutex<GPU>> = Lazy::new(|| {
     Mutex::new(GPU {
         memory: Memory {
             data: HashMap::new(),
+            sizes: HashMap::new(),
         },
         sms: std::iter::repeat_with(|| SM::new(10)).take(5).collect(),
         kernel_symbol: None,
         launch_params: None,
         raw_ptx: None,
+        num_args: None,
     })
 });
