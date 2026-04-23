@@ -43,6 +43,7 @@ pub enum InstType {
     Ex2ApproxF32,
     CvtaToGlobal,
     CvtSatF32F32,
+    LdGlobalU32,
     LdGlobalF32,
     LdGlobalNcF32,
     StGlobalF32,

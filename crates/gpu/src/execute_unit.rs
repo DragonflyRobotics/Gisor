@@ -199,6 +199,7 @@ impl execute_unit {
             InstType::CvtSatF32F32 => self.cvt_sat_f32_f32(a[0], a[1]),
 
             // --- Memory ---
+            InstType::LdGlobalU32 => self.ld_global_u32(a[0], a[1], mem, args),
             InstType::LdGlobalF32 => self.ld_global_f32(a[0], a[1], mem, args),
             InstType::LdGlobalNcF32 => self.ld_global_nc_f32(a[0], a[1], mem, args),
             InstType::StGlobalF32 => self.st_global_f32(a[0], a[1], mem, args),
@@ -479,7 +480,18 @@ impl execute_unit {
     }
 
     // Branch and Conditionals -- End
-
+    
+    fn ld_global_u32(&mut self, dst: usize, addr_reg: usize, mem: &Memory, args: Vec<usize>) {
+        let addr = self.rd[addr_reg];
+        let mut bytes = [0u8; 4];
+        for i in 0..4 {
+            let addr = MemoryAddress { address: (addr as usize + i) as u64 };
+            bytes[i] = mem.data.get(&addr).unwrap().value;
+        }
+        let result = u32::from_le_bytes(bytes);
+        self.r[dst] = result;
+        println!("LDGLOBALU32: res = {}", result);
+    }
 
     fn ld_global_f32(&mut self, dst: usize, addr_reg: usize, mem: &Memory, args: Vec<usize>) {
         let addr = self.rd[addr_reg];
