@@ -4,10 +4,10 @@ use memory::MemoryAddress;
 use crate::basegpu::GPU0;
 use crate::inst_type::InstType;
 
-#[derive(Default, Clone)]
+#[derive(Default, Clone, Debug)]
 pub struct inst_info {
-    pub(crate) inst_type: InstType,
-    pub(crate) args:Vec<usize>,
+    pub inst_type: InstType,
+    pub args:Vec<usize>,
 }
 
 pub fn make_inst(inst_type: InstType, args: Vec<usize>) -> inst_info {

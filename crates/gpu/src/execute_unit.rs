@@ -65,6 +65,18 @@ impl Default for execute_unit {
         }
     }
 }
+pub fn run_demo(args1: Vec<usize>, args2: Vec<usize>, args3: Vec<usize>, args4: Vec<usize>, args5: Vec<usize>) {
+    let mut insts: Vec<inst_info> = Vec::new();
+    insts.push(inst_info { inst_type: InstType::LdParamU64, args: args1});
+    insts.push(inst_info { inst_type: InstType::CvtaToGlobal, args: args2});
+    insts.push(inst_info { inst_type: InstType::MulWideS32, args: args3});
+    insts.push(inst_info { inst_type: InstType::AddS64, args: args4});
+    insts.push(inst_info { inst_type: InstType::LdGlobalF32, args: args5});
+
+    let mut executor: execute_unit = execute_unit::new();
+    executor.inst_list = insts;
+    executor.execute_all();
+}
 
 impl execute_unit {
     pub(crate) fn new() -> Self {
