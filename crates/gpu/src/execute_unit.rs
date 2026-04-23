@@ -202,6 +202,7 @@ impl execute_unit {
             InstType::LdGlobalU32 => self.ld_global_u32(a[0], a[1], mem, args),
             InstType::LdGlobalF32 => self.ld_global_f32(a[0], a[1], mem, args),
             InstType::LdGlobalNcF32 => self.ld_global_nc_f32(a[0], a[1], mem, args),
+            InstType::StGlobalU32 => self.st_global_u32(a[0], a[1], mem, args),
             InstType::StGlobalF32 => self.st_global_f32(a[0], a[1], mem, args),
 
             // --- Predicates ---
@@ -221,6 +222,17 @@ impl execute_unit {
 
             // --- Oth ---
             InstType::NoOp => { return; }
+
+            // --- Stuffs ---
+            InstType::AndB32 => { self.and_b32(a[0], a[1], a[2]) },
+            InstType::SetpEqB32 => { self.setp_eq_b32(a[0], a[1], a[2]) },
+            InstType::XorPred => { self.xor_pred(a[0], a[1], a[2]) },
+            InstType::NotPred => { self.not_pred(a[0], a[1]) },
+            InstType::ShrU32 => { self.shr_u32(a[0], a[1], a[2])},
+            InstType::ShrS32 => {self.shr_s32(a[0], a[1], a[2])},
+            InstType::MovPred => {self.mov_pred(a[0], a[1] != 0)},
+            InstType::MadLoS32Imm => {self.mad_lo_s32_imm(a[0], a[1], a[2] as i32, a[3] as i32)},
+            InstType::BraUni => {self.bra_uni(a[0] as u32); return; }
         }
         self.pc += 1;
     }
@@ -508,7 +520,18 @@ impl execute_unit {
     fn ld_global_nc_f32(&mut self, dst: usize, addr: usize, mem: &Memory, args: Vec<usize>) {
         self.ld_global_f32(dst, addr, mem, args);
     }
-
+    fn st_global_u32(&mut self, addr_reg: usize, src: usize, mem: &mut Memory, args: Vec<usize>) {
+        let addr = self.rd[addr_reg];
+        let bytes = self.r[src].to_le_bytes();
+        for i in 0..4 {
+            let addr = MemoryAddress { address: (addr as usize + i) as u64 };
+            if let Some(val) = mem.data.get_mut(&addr) {
+                val.value = bytes[i];
+            } else {
+                // Shit Happened
+            }
+        }
+    }
     fn st_global_f32(&mut self, addr_reg: usize, src: usize, mem: &mut Memory, args: Vec<usize>) {
         let addr = self.rd[addr_reg];
         let bytes = self.f[src].to_le_bytes();
@@ -539,469 +562,41 @@ impl execute_unit {
         }
     }
 
+    fn and_b32(&mut self, dst: usize, a: usize, b: usize) {
+        self.r[dst] = self.r[a] & self.r[b];
+    }
+
+    fn setp_eq_b32(&mut self, dst: usize, a: usize, b: usize) {
+        self.p[dst] = self.r[a] == self.r[b];
+    }
+
+    fn xor_pred(&mut self, dst: usize, a: usize, b: usize) {
+        self.p[dst] = self.p[a] ^ self.p[b];
+    }
+
+    fn not_pred(&mut self, dst: usize, src: usize) {
+        self.p[dst] = !self.p[src];
+    }
+
+    fn shr_u32(&mut self, dst: usize, src: usize, shift: usize) {
+        self.r[dst] = self.r[src] >> shift;
+    }
+
+    fn shr_s32(&mut self, dst: usize, src: usize, shift: usize) {
+        self.r[dst] = ((self.r[src] as i32) >> shift) as u32;
+    }
+
+    fn mov_pred(&mut self, dst: usize, val: bool) {
+        self.p[dst] = val;
+    }
+
+    fn mad_lo_s32_imm(&mut self, dst: usize, a: usize, mul_imm: i32, add_imm: i32) {
+        let result = (self.r[a] as i32).wrapping_mul(mul_imm).wrapping_add(add_imm);
+        self.r[dst] = result as u32;
+    }
+
+    fn bra_uni(&mut self, target_pc: u32) {
+        self.pc = target_pc;
+    }
 }
 
-/*
-        match inst.inst_type {
-            InstType::LdParamU64 => {
-                let dst = *inst.args[0].downcast_ref::<usize>().unwrap();
-                let val = *inst.args[1].downcast_ref::<u64>().unwrap();
-                self.load_param_u64(dst, val);
-            }
-            InstType::LdParamU32 => {
-                let dst = *inst.args[0].downcast_ref::<usize>().unwrap();
-                let val = *inst.args[1].downcast_ref::<u32>().unwrap();
-                self.load_param_u32(dst, val);
-            }
-            InstType::MovTidX => {
-                let dst = *inst.args[0].downcast_ref::<usize>().unwrap();
-                self.mov_u32_tid_x(dst);
-            }
-            InstType::MovTidY => {
-                let dst = *inst.args[0].downcast_ref::<usize>().unwrap();
-                self.mov_u32_tid_y(dst);
-            }
-            InstType::MovCtaidX => {
-                let dst = *inst.args[0].downcast_ref::<usize>().unwrap();
-                self.mov_u32_ctaid_x(dst);
-            }
-            InstType::MovCtaidY => {
-                let dst = *inst.args[0].downcast_ref::<usize>().unwrap();
-                self.mov_u32_ctaid_y(dst);
-            }
-            InstType::MovNtidX => {
-                let dst = *inst.args[0].downcast_ref::<usize>().unwrap();
-                self.mov_u32_ntid_x(dst);
-            }
-            InstType::MovNtidY => {
-                let dst = *inst.args[0].downcast_ref::<usize>().unwrap();
-                self.mov_u32_ntid_y(dst);
-            }
-            InstType::MadLoS32 => {
-                let dst = *inst.args[0].downcast_ref::<usize>().unwrap();
-                let a   = *inst.args[1].downcast_ref::<usize>().unwrap();
-                let b   = *inst.args[2].downcast_ref::<usize>().unwrap();
-                let c   = *inst.args[3].downcast_ref::<usize>().unwrap();
-                self.mad_lo_s32(dst, a, b, c);
-            }
-            InstType::SetpGeS32 => {
-                let dst = *inst.args[0].downcast_ref::<usize>().unwrap();
-                let a   = *inst.args[1].downcast_ref::<usize>().unwrap();
-                let b   = *inst.args[2].downcast_ref::<usize>().unwrap();
-                self.setp_ge_s32(dst, a, b);
-            }
-            InstType::OrPred => {
-                let dst = *inst.args[0].downcast_ref::<usize>().unwrap();
-                let a   = *inst.args[1].downcast_ref::<usize>().unwrap();
-                let b   = *inst.args[2].downcast_ref::<usize>().unwrap();
-                self.or_pred(dst, a, b);
-            }
-            InstType::BraIf => {
-                let pred = *inst.args[0].downcast_ref::<usize>().unwrap();
-                self.bra_if(pred);
-                if self.branch_is_taken {
-                    self.pc = self.total_number_inst; // jump past end → exits while loop
-                    return;
-                }
-            }
-            InstType::CvtaToGlobal => {
-                let dst = *inst.args[0].downcast_ref::<usize>().unwrap();
-                let src = *inst.args[1].downcast_ref::<usize>().unwrap();
-                self.cvta_to_global_u64(dst, src);
-            }
-            InstType::MulWideS32 => {
-                let dst = *inst.args[0].downcast_ref::<usize>().unwrap();
-                let a   = *inst.args[1].downcast_ref::<usize>().unwrap();
-                let imm = *inst.args[2].downcast_ref::<u64>().unwrap();
-                self.mul_wide_s32(dst, a, imm);
-            }
-            InstType::AddS64 => {
-                let dst = *inst.args[0].downcast_ref::<usize>().unwrap();
-                let a   = *inst.args[1].downcast_ref::<usize>().unwrap();
-                let b   = *inst.args[2].downcast_ref::<usize>().unwrap();
-                self.add_s64(dst, a, b);
-            }
-            InstType::AddF32 => {
-                let dst = *inst.args[0].downcast_ref::<usize>().unwrap();
-                let a   = *inst.args[1].downcast_ref::<usize>().unwrap();
-                let b   = *inst.args[2].downcast_ref::<usize>().unwrap();
-                self.add_f32(dst, a, b);
-            }
-            InstType::LdGlobalF32 => {
-                let dst  = *inst.args[0].downcast_ref::<usize>().unwrap();
-                let addr = *inst.args[1].downcast_ref::<usize>().unwrap();
-                self.ld_global_f32(dst, addr);
-            }
-            InstType::StGlobalF32 => {
-                let addr = *inst.args[0].downcast_ref::<usize>().unwrap();
-                let src  = *inst.args[1].downcast_ref::<usize>().unwrap();
-                self.st_global_f32(addr, src);
-            }
-            InstType::Ret => {
-                self.pc = self.total_number_inst;
-            }
-            InstType::SubF32 => {
-                let dst = *inst.args[0].downcast_ref::<usize>().unwrap();
-                let a   = *inst.args[1].downcast_ref::<usize>().unwrap();
-                let b   = *inst.args[2].downcast_ref::<usize>().unwrap();
-                self.sub_f32(dst, a, b);
-            }
-            InstType::MulF32 => {
-                let dst = *inst.args[0].downcast_ref::<usize>().unwrap();
-                let a   = *inst.args[1].downcast_ref::<usize>().unwrap();
-                let b   = *inst.args[2].downcast_ref::<usize>().unwrap();
-                self.mul_f32(dst, a, b);
-            }
-            InstType::LdParamF32 => {
-                let dst = *inst.args[0].downcast_ref::<usize>().unwrap();
-                let val = *inst.args[1].downcast_ref::<f32>().unwrap();
-                self.load_param_f32(dst, val);
-            }
-            InstType::FmaRnF32 => {
-                let dst = *inst.args[0].downcast_ref::<usize>().unwrap();
-                let a   = *inst.args[1].downcast_ref::<usize>().unwrap();
-                let b   = *inst.args[2].downcast_ref::<usize>().unwrap();
-                let c   = *inst.args[3].downcast_ref::<usize>().unwrap();
-                self.fma_rn_f32(dst, a, b, c);
-            }
-            InstType::AddS32 => {
-                let dst = *inst.args[0].downcast_ref::<usize>().unwrap();
-                let a   = *inst.args[1].downcast_ref::<usize>().unwrap();
-                let b   = *inst.args[2].downcast_ref::<usize>().unwrap();
-                self.add_s32(dst, a, b);
-            }
-            InstType::AddS32Imm => {
-                let dst = *inst.args[0].downcast_ref::<usize>().unwrap();
-                let a   = *inst.args[1].downcast_ref::<usize>().unwrap();
-                let imm = *inst.args[2].downcast_ref::<i32>().unwrap();
-                self.add_s32_imm(dst, a, imm);
-            }
-            InstType::SetpLtS32 => {
-                let dst = *inst.args[0].downcast_ref::<usize>().unwrap();
-                let a   = *inst.args[1].downcast_ref::<usize>().unwrap();
-                let b   = *inst.args[2].downcast_ref::<usize>().unwrap();
-                self.setp_lt_s32(dst, a, b);
-            }
-            InstType::SetpLtS32Imm => {
-                let dst = *inst.args[0].downcast_ref::<usize>().unwrap();
-                let a   = *inst.args[1].downcast_ref::<usize>().unwrap();
-                let imm = *inst.args[2].downcast_ref::<i32>().unwrap();
-                self.setp_lt_s32_imm(dst, a, imm);
-            }
-            InstType::MovU32Imm => {
-                let dst = *inst.args[0].downcast_ref::<usize>().unwrap();
-                let imm = *inst.args[1].downcast_ref::<u32>().unwrap();
-                self.mov_u32_imm(dst, imm);
-            }
-            InstType::MovF32Imm => {
-                let dst = *inst.args[0].downcast_ref::<usize>().unwrap();
-                let imm = *inst.args[1].downcast_ref::<f32>().unwrap();
-                self.mov_f32_imm(dst, imm);
-            }
-            InstType::MovF32 => {
-                let dst = *inst.args[0].downcast_ref::<usize>().unwrap();
-                let src = *inst.args[1].downcast_ref::<usize>().unwrap();
-                self.mov_f32(dst, src);
-            }
-            InstType::Bra => {
-                let target = *inst.args[0].downcast_ref::<u32>().unwrap();
-                self.bra(target);
-                return; // don't increment pc
-            }
-            InstType::BraIfNot => {
-                let pred   = *inst.args[0].downcast_ref::<usize>().unwrap();
-                let target = *inst.args[1].downcast_ref::<u32>().unwrap();
-                self.bra_if_not(pred, target);
-                if self.branch_is_taken {
-                    return;
-                }
-            }
-            InstType::NegF32 => {
-                let dst = *inst.args[0].downcast_ref::<usize>().unwrap();
-                let src = *inst.args[1].downcast_ref::<usize>().unwrap();
-                self.neg_f32(dst, src);
-            }
-            InstType::MovF32Bits => {
-                let dst  = *inst.args[0].downcast_ref::<usize>().unwrap();
-                let bits = *inst.args[1].downcast_ref::<u32>().unwrap();
-                self.mov_f32_bits(dst, bits);
-            }
-            InstType::FmaRmF32 => {
-                let dst = *inst.args[0].downcast_ref::<usize>().unwrap();
-                let a   = *inst.args[1].downcast_ref::<usize>().unwrap();
-                let b   = *inst.args[2].downcast_ref::<usize>().unwrap();
-                let c   = *inst.args[3].downcast_ref::<usize>().unwrap();
-                self.fma_rm_f32(dst, a, b, c);
-            }
-            InstType::CvtSatF32F32 => {
-                let dst = *inst.args[0].downcast_ref::<usize>().unwrap();
-                let src = *inst.args[1].downcast_ref::<usize>().unwrap();
-                self.cvt_sat_f32_f32(dst, src);
-            }
-            InstType::ShlB32 => {
-                let dst = *inst.args[0].downcast_ref::<usize>().unwrap();
-                let src = *inst.args[1].downcast_ref::<usize>().unwrap();
-                let imm = *inst.args[2].downcast_ref::<u32>().unwrap();
-                self.shl_b32(dst, src, imm);
-            }
-            InstType::MovB32FromF32 => {
-                let dst = *inst.args[0].downcast_ref::<usize>().unwrap();
-                let src = *inst.args[1].downcast_ref::<usize>().unwrap();
-                self.mov_b32_from_f32(dst, src);
-            }
-            InstType::MovF32FromB32 => {
-                let dst = *inst.args[0].downcast_ref::<usize>().unwrap();
-                let src = *inst.args[1].downcast_ref::<usize>().unwrap();
-                self.mov_f32_from_b32(dst, src);
-            }
-            InstType::Ex2ApproxF32 => {
-                let dst = *inst.args[0].downcast_ref::<usize>().unwrap();
-                let src = *inst.args[1].downcast_ref::<usize>().unwrap();
-                self.ex2_approx_ftz_f32(dst, src);
-            }
-            InstType::RcpRnF32 => {
-                let dst = *inst.args[0].downcast_ref::<usize>().unwrap();
-                let src = *inst.args[1].downcast_ref::<usize>().unwrap();
-                self.rcp_rn_f32(dst, src);
-            }
-            InstType::AddF32Imm => {
-                let dst  = *inst.args[0].downcast_ref::<usize>().unwrap();
-                let src  = *inst.args[1].downcast_ref::<usize>().unwrap();
-                let bits = *inst.args[2].downcast_ref::<u32>().unwrap();
-                self.add_f32_imm(dst, src, f32::from_bits(bits));
-            }
-        }
-         */
-
-/*
-        let inst = &self.inst_list[self.pc as usize];
-        match inst.inst_type {
-            InstType::LdParamU64 => {
-                let dst = *inst.args[0].downcast_ref::<usize>().unwrap();
-                let val = *inst.args[1].downcast_ref::<u64>().unwrap();
-                self.load_param_u64(dst, val);
-            }
-            InstType::LdParamU32 => {
-                let dst = *inst.args[0].downcast_ref::<usize>().unwrap();
-                let val = *inst.args[1].downcast_ref::<u32>().unwrap();
-                self.load_param_u32(dst, val);
-            }
-            InstType::MovTidX => {
-                let dst = *inst.args[0].downcast_ref::<usize>().unwrap();
-                self.mov_u32_tid_x(dst);
-            }
-            InstType::MovTidY => {
-                let dst = *inst.args[0].downcast_ref::<usize>().unwrap();
-                self.mov_u32_tid_y(dst);
-            }
-            InstType::MovCtaidX => {
-                let dst = *inst.args[0].downcast_ref::<usize>().unwrap();
-                self.mov_u32_ctaid_x(dst);
-            }
-            InstType::MovCtaidY => {
-                let dst = *inst.args[0].downcast_ref::<usize>().unwrap();
-                self.mov_u32_ctaid_y(dst);
-            }
-            InstType::MovNtidX => {
-                let dst = *inst.args[0].downcast_ref::<usize>().unwrap();
-                self.mov_u32_ntid_x(dst);
-            }
-            InstType::MovNtidY => {
-                let dst = *inst.args[0].downcast_ref::<usize>().unwrap();
-                self.mov_u32_ntid_y(dst);
-            }
-            InstType::MadLoS32 => {
-                let dst = *inst.args[0].downcast_ref::<usize>().unwrap();
-                let a   = *inst.args[1].downcast_ref::<usize>().unwrap();
-                let b   = *inst.args[2].downcast_ref::<usize>().unwrap();
-                let c   = *inst.args[3].downcast_ref::<usize>().unwrap();
-                self.mad_lo_s32(dst, a, b, c);
-            }
-            InstType::SetpGeS32 => {
-                let dst = *inst.args[0].downcast_ref::<usize>().unwrap();
-                let a   = *inst.args[1].downcast_ref::<usize>().unwrap();
-                let b   = *inst.args[2].downcast_ref::<usize>().unwrap();
-                self.setp_ge_s32(dst, a, b);
-            }
-            InstType::OrPred => {
-                let dst = *inst.args[0].downcast_ref::<usize>().unwrap();
-                let a   = *inst.args[1].downcast_ref::<usize>().unwrap();
-                let b   = *inst.args[2].downcast_ref::<usize>().unwrap();
-                self.or_pred(dst, a, b);
-            }
-            InstType::BraIf => {
-                let pred = *inst.args[0].downcast_ref::<usize>().unwrap();
-                self.bra_if(pred);
-                if self.branch_is_taken {
-                    return;
-                }
-            }
-            InstType::CvtaToGlobal => {
-                let dst = *inst.args[0].downcast_ref::<usize>().unwrap();
-                let src = *inst.args[1].downcast_ref::<usize>().unwrap();
-                self.cvta_to_global_u64(dst, src);
-            }
-            InstType::MulWideS32 => {
-                let dst = *inst.args[0].downcast_ref::<usize>().unwrap();
-                let a   = *inst.args[1].downcast_ref::<usize>().unwrap();
-                let imm = *inst.args[2].downcast_ref::<u64>().unwrap();
-                self.mul_wide_s32(dst, a, imm);
-            }
-            InstType::AddS64 => {
-                let dst = *inst.args[0].downcast_ref::<usize>().unwrap();
-                let a   = *inst.args[1].downcast_ref::<usize>().unwrap();
-                let b   = *inst.args[2].downcast_ref::<usize>().unwrap();
-                self.add_s64(dst, a, b);
-            }
-            InstType::AddF32 => {
-                let dst = *inst.args[0].downcast_ref::<usize>().unwrap();
-                let a   = *inst.args[1].downcast_ref::<usize>().unwrap();
-                let b   = *inst.args[2].downcast_ref::<usize>().unwrap();
-                self.add_f32(dst, a, b);
-            }
-            InstType::LdGlobalF32 => {
-                let dst  = *inst.args[0].downcast_ref::<usize>().unwrap();
-                let addr = *inst.args[1].downcast_ref::<usize>().unwrap();
-                self.ld_global_f32(dst, addr);
-            }
-            InstType::StGlobalF32 => {
-                let addr = *inst.args[0].downcast_ref::<usize>().unwrap();
-                let src  = *inst.args[1].downcast_ref::<usize>().unwrap();
-                self.st_global_f32(addr, src);
-            }
-            InstType::Ret => {
-                self.pc = self.total_number_inst;
-            }
-            InstType::SubF32 => {
-                let dst = *inst.args[0].downcast_ref::<usize>().unwrap();
-                let a   = *inst.args[1].downcast_ref::<usize>().unwrap();
-                let b   = *inst.args[2].downcast_ref::<usize>().unwrap();
-                self.sub_f32(dst, a, b);
-            }
-            InstType::MulF32 => {
-                let dst = *inst.args[0].downcast_ref::<usize>().unwrap();
-                let a   = *inst.args[1].downcast_ref::<usize>().unwrap();
-                let b   = *inst.args[2].downcast_ref::<usize>().unwrap();
-                self.mul_f32(dst, a, b);
-            }
-            InstType::LdParamF32 => {
-                let dst = *inst.args[0].downcast_ref::<usize>().unwrap();
-                let val = *inst.args[1].downcast_ref::<f32>().unwrap();
-                self.load_param_f32(dst, val);
-            }
-            InstType::FmaRnF32 => {
-                let dst = *inst.args[0].downcast_ref::<usize>().unwrap();
-                let a   = *inst.args[1].downcast_ref::<usize>().unwrap();
-                let b   = *inst.args[2].downcast_ref::<usize>().unwrap();
-                let c   = *inst.args[3].downcast_ref::<usize>().unwrap();
-                self.fma_rn_f32(dst, a, b, c);
-            }
-            InstType::AddS32 => {
-                let dst = *inst.args[0].downcast_ref::<usize>().unwrap();
-                let a   = *inst.args[1].downcast_ref::<usize>().unwrap();
-                let b   = *inst.args[2].downcast_ref::<usize>().unwrap();
-                self.add_s32(dst, a, b);
-            }
-            InstType::AddS32Imm => {
-                let dst = *inst.args[0].downcast_ref::<usize>().unwrap();
-                let a   = *inst.args[1].downcast_ref::<usize>().unwrap();
-                let imm = *inst.args[2].downcast_ref::<i32>().unwrap();
-                self.add_s32_imm(dst, a, imm);
-            }
-            InstType::SetpLtS32 => {
-                let dst = *inst.args[0].downcast_ref::<usize>().unwrap();
-                let a   = *inst.args[1].downcast_ref::<usize>().unwrap();
-                let b   = *inst.args[2].downcast_ref::<usize>().unwrap();
-                self.setp_lt_s32(dst, a, b);
-            }
-            InstType::SetpLtS32Imm => {
-                let dst = *inst.args[0].downcast_ref::<usize>().unwrap();
-                let a   = *inst.args[1].downcast_ref::<usize>().unwrap();
-                let imm = *inst.args[2].downcast_ref::<i32>().unwrap();
-                self.setp_lt_s32_imm(dst, a, imm);
-            }
-            InstType::MovU32Imm => {
-                let dst = *inst.args[0].downcast_ref::<usize>().unwrap();
-                let imm = *inst.args[1].downcast_ref::<u32>().unwrap();
-                self.mov_u32_imm(dst, imm);
-            }
-            InstType::MovF32Imm => {
-                let dst = *inst.args[0].downcast_ref::<usize>().unwrap();
-                let imm = *inst.args[1].downcast_ref::<f32>().unwrap();
-                self.mov_f32_imm(dst, imm);
-            }
-            InstType::MovF32 => {
-                let dst = *inst.args[0].downcast_ref::<usize>().unwrap();
-                let src = *inst.args[1].downcast_ref::<usize>().unwrap();
-                self.mov_f32(dst, src);
-            }
-            InstType::Bra => {
-                let target = *inst.args[0].downcast_ref::<u32>().unwrap();
-                self.bra(target);
-                return; // don't increment pc
-            }
-            InstType::BraIfNot => {
-                let pred   = *inst.args[0].downcast_ref::<usize>().unwrap();
-                let target = *inst.args[1].downcast_ref::<u32>().unwrap();
-                self.bra_if_not(pred, target);
-                if self.branch_is_taken {
-                    return;
-                }
-            }
-            InstType::NegF32 => {
-                let dst = *inst.args[0].downcast_ref::<usize>().unwrap();
-                let src = *inst.args[1].downcast_ref::<usize>().unwrap();
-                self.neg_f32(dst, src);
-            }
-            InstType::MovF32Bits => {
-                let dst  = *inst.args[0].downcast_ref::<usize>().unwrap();
-                let bits = *inst.args[1].downcast_ref::<u32>().unwrap();
-                self.mov_f32_bits(dst, bits);
-            }
-            InstType::FmaRmF32 => {
-                let dst = *inst.args[0].downcast_ref::<usize>().unwrap();
-                let a   = *inst.args[1].downcast_ref::<usize>().unwrap();
-                let b   = *inst.args[2].downcast_ref::<usize>().unwrap();
-                let c   = *inst.args[3].downcast_ref::<usize>().unwrap();
-                self.fma_rm_f32(dst, a, b, c);
-            }
-            InstType::CvtSatF32F32 => {
-                let dst = *inst.args[0].downcast_ref::<usize>().unwrap();
-                let src = *inst.args[1].downcast_ref::<usize>().unwrap();
-                self.cvt_sat_f32_f32(dst, src);
-            }
-            InstType::ShlB32 => {
-                let dst = *inst.args[0].downcast_ref::<usize>().unwrap();
-                let src = *inst.args[1].downcast_ref::<usize>().unwrap();
-                let imm = *inst.args[2].downcast_ref::<u32>().unwrap();
-                self.shl_b32(dst, src, imm);
-            }
-            InstType::MovB32FromF32 => {
-                let dst = *inst.args[0].downcast_ref::<usize>().unwrap();
-                let src = *inst.args[1].downcast_ref::<usize>().unwrap();
-                self.mov_b32_from_f32(dst, src);
-            }
-            InstType::MovF32FromB32 => {
-                let dst = *inst.args[0].downcast_ref::<usize>().unwrap();
-                let src = *inst.args[1].downcast_ref::<usize>().unwrap();
-                self.mov_f32_from_b32(dst, src);
-            }
-            InstType::Ex2ApproxF32 => {
-                let dst = *inst.args[0].downcast_ref::<usize>().unwrap();
-                let src = *inst.args[1].downcast_ref::<usize>().unwrap();
-                self.ex2_approx_ftz_f32(dst, src);
-            }
-            InstType::RcpRnF32 => {
-                let dst = *inst.args[0].downcast_ref::<usize>().unwrap();
-                let src = *inst.args[1].downcast_ref::<usize>().unwrap();
-                self.rcp_rn_f32(dst, src);
-            }
-            InstType::AddF32Imm => {
-                let dst  = *inst.args[0].downcast_ref::<usize>().unwrap();
-                let src  = *inst.args[1].downcast_ref::<usize>().unwrap();
-                let bits = *inst.args[2].downcast_ref::<u32>().unwrap();
-                self.add_f32_imm(dst, src, f32::from_bits(bits));
-            }
-        }
-        self.pc += 1;
-         */
