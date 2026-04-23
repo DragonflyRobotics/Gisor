@@ -145,7 +145,6 @@ impl execute_unit {
     fn execute_single_inst(&mut self, inst: inst_info, mem: &mut Memory, args: Vec<usize>) {
         let a = &inst.args; // shorthand
         // println!("{:?}", inst.inst_type);
-        // println!("DEBUG: args = {:?}", a);
         match inst.inst_type {
             // --- Loads ---
             InstType::LdParamU64 => self.load_param_u64(a[0], a[1] as u64, mem, args),
@@ -185,6 +184,7 @@ impl execute_unit {
             InstType::AddF32 => self.add_f32(a[0], a[1], a[2]),
             InstType::AddF32Imm => self.add_f32_imm(a[0], a[1], f32::from_bits(a[2] as u32)),
             InstType::SubF32 => self.sub_f32(a[0], a[1], a[2]),
+            InstType::DivRnF32 => self.div_rn_f32(a[0], a[1], a[2]),
             InstType::MulF32 => self.mul_f32(a[0], a[1], a[2]),
             InstType::MulWideS32 => self.mul_wide_s32(a[0], a[1], a[2] as u64),
             InstType::MadLoS32 => self.mad_lo_s32(a[0], a[1], a[2], a[3]),
@@ -197,6 +197,7 @@ impl execute_unit {
             // --- Conversion ---
             InstType::CvtaToGlobal => self.cvta_to_global_u64(a[0], a[1]),
             InstType::CvtSatF32F32 => self.cvt_sat_f32_f32(a[0], a[1]),
+            InstType::CvtRnF32S32 => self.cvt_rn_f32_s32(a[0], a[1]),
 
             // --- Memory ---
             InstType::LdGlobalU32 => self.ld_global_u32(a[0], a[1], mem, args),
@@ -208,6 +209,7 @@ impl execute_unit {
             // --- Predicates ---
             InstType::SetpGeS32 => self.setp_ge_s32(a[0], a[1], a[2]),
             InstType::SetpGeS32Imm => self.setp_ge_s32_imm(a[0], a[1], a[2] as i32),
+            InstType::SetpLeF32Imm => self.setp_le_f32_imm(a[0], a[1], a[2]),
             InstType::SetpLtS32 => self.setp_lt_s32(a[0], a[1], a[2]),
             InstType::SetpLtS32Imm => self.setp_lt_s32_imm(a[0], a[1], a[2] as i32),
             InstType::OrPred => self.or_pred(a[0], a[1], a[2]),
@@ -254,8 +256,6 @@ impl execute_unit {
         self.pc = 0;                    // reset to start of instruction list
         self.branch_is_taken = false;   // clear branch flag
         while self.pc < self.total_number_inst {
-            println!("{:?}", self.inst_list[self.pc as usize]);
-            println!("{:?}", self.pc);
             self.execute_in_seq(mem, args.clone());
         }
     }
@@ -274,7 +274,7 @@ impl execute_unit {
         let result = u64::from_le_bytes(bytes);
         self.rd[dst] = result;
          */
-        println!("{}", args[addr as usize] as u64);
+        // println!("{}", args[addr as usize] as u64);
         self.rd[dst] = args[addr as usize] as u64;
     }
 
@@ -290,7 +290,7 @@ impl execute_unit {
         let result = u32::from_le_bytes(bytes);
         self.r[dst] = result;
          */
-        println!("{}", args[addr as usize] as u32);
+        // println!("{}", args[addr as usize] as u32);
         self.r[dst] = args[addr as usize] as u32;
     }
 
@@ -304,7 +304,7 @@ impl execute_unit {
         let result = f32::from_le_bytes(bytes);
         self.f[dst] = result;
          */
-        println!("{}", args[addr as usize] as f32);
+        // println!("{}", args[addr as usize] as f32);
         self.f[dst] = args[addr as usize] as f32;
     }
 
@@ -423,6 +423,10 @@ impl execute_unit {
     fn sub_f32(&mut self, dst: usize, a: usize, b: usize) {
         self.f[dst] = self.f[a] - self.f[b];
     }
+    
+    fn div_rn_f32(&mut self, dst: usize, a: usize, b: usize) {
+        self.f[dst] = self.f[a] / self.f[b];
+    }
 
     fn mul_f32(&mut self, dst: usize, a: usize, b: usize) {
         self.f[dst] = self.f[a] * self.f[b];
@@ -464,6 +468,12 @@ impl execute_unit {
 
     fn setp_ge_s32_imm(&mut self, dst: usize, a: usize, imm: i32) {
         self.p[dst] = (self.r[a] as i32) >= imm;
+    }
+    
+    fn setp_le_f32_imm(&mut self, dst: usize, a: usize, imm_bits: usize) {
+        let a_f32 = f32::from_bits(self.r[a] as u32);
+        let imm_f32 = f32::from_bits(imm_bits as u32);
+        self.p[dst] = a_f32 <= imm_f32;
     }
 
     fn setp_lt_s32(&mut self, dst: usize, a: usize, b: usize) {
@@ -509,7 +519,7 @@ impl execute_unit {
         }
         let result = u32::from_le_bytes(bytes);
         self.r[dst] = result;
-        println!("LDGLOBALU32: res = {}", result);
+        // println!("LDGLOBALU32: res = {}", result);
     }
 
     fn ld_global_f32(&mut self, dst: usize, addr_reg: usize, mem: &Memory, args: Vec<usize>) {
@@ -521,7 +531,7 @@ impl execute_unit {
         }
         let result = f32::from_le_bytes(bytes);
         self.f[dst] = result;
-        println!("LDGLOBALF32: res = {}", result);
+        // println!("LDGLOBALF32: res = {}", result);
     }
 
     fn ld_global_nc_f32(&mut self, dst: usize, addr: usize, mem: &Memory, args: Vec<usize>) {
@@ -559,6 +569,11 @@ impl execute_unit {
 
     fn cvt_sat_f32_f32(&mut self, dst: usize, src: usize) {
         self.f[dst] = self.f[src].clamp(0.0f32, 1.0f32);
+    }
+    
+    fn cvt_rn_f32_s32(&mut self, dst: usize, src: usize) {
+        // Convert signed 32-bit integer to float with round-to-nearest-even
+        self.f[dst] = (self.r[src] as i32) as f32;
     }
 
     fn ex2_approx_ftz_f32(&mut self, dst: usize, src: usize) {

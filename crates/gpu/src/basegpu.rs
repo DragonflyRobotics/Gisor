@@ -1,5 +1,7 @@
 use std::{collections::HashMap, sync::Mutex};
 
+use crate::inst_info::make_inst;
+use crate::inst_type::InstType;
 use csv::Writer;
 use indicatif::{ProgressBar, ProgressStyle};
 use memory::{Memory, MemoryAddress, MemoryElement};
@@ -7,11 +9,11 @@ use nvtypes::dim3;
 use once_cell::sync::Lazy;
 use serde::Serialize;
 use utils::triple_zip;
-use crate::inst_info::make_inst;
-use crate::inst_type::InstType;
 
 use crate::{
-    inst_info::inst_info, sm::SM, warp::{Warp, WarpState}
+    inst_info::inst_info,
+    sm::SM,
+    warp::{Warp, WarpState},
 };
 
 #[derive(Serialize)]
@@ -50,7 +52,7 @@ pub struct GPU {
     launch_params: Option<LaunchParams>,
     raw_ptx: Option<String>,
     pub num_args: Option<usize>,
-    pub kernels: HashMap<String, Vec<inst_info>>
+    pub kernels: HashMap<String, Vec<inst_info>>,
 }
 
 impl BasicGPU for GPU {
@@ -153,31 +155,36 @@ impl BasicGPU for GPU {
     }
 
     fn execute(&mut self, args: Vec<usize>) {
-        let insts = self.kernels.get(self.kernel_symbol.as_deref().unwrap()).unwrap();
+        let insts = self
+            .kernels
+            .get(self.kernel_symbol.as_deref().unwrap())
+            .unwrap();
         self.num_args = Some(args.len());
         for sm in self.sms.iter_mut() {
             let pb = ProgressBar::new(sm.warps.len() as u64);
             pb.set_style(ProgressStyle::default_bar());
             for warp in sm.warps.iter_mut() {
-                for thread in warp.threads.iter_mut() {
-                    println!("Run start");
-                    thread.execute_unit.set_execute_id(
-                        thread.threads_pos.x,
-                        thread.threads_pos.y,
-                        thread.threads_pos.z,
-                        thread.grid_pos.x,
-                        thread.grid_pos.y,
-                        thread.grid_pos.z,
-                        self.launch_params.as_ref().unwrap().block.0,
-                        self.launch_params.as_ref().unwrap().block.1,
-                        self.launch_params.as_ref().unwrap().block.2,
-                        self.launch_params.as_ref().unwrap().grid.0,
-                        self.launch_params.as_ref().unwrap().grid.1,
-                        self.launch_params.as_ref().unwrap().grid.2,
-                    );
-                    thread.execute_unit.import_inst(insts.clone());
-                    thread.execute_unit.execute_all(&mut self.memory, args.clone());
-                    println!("Run end");
+                if (warp.state == WarpState::Active) {
+                    for thread in warp.threads.iter_mut() {
+                        thread.execute_unit.set_execute_id(
+                            thread.threads_pos.x,
+                            thread.threads_pos.y,
+                            thread.threads_pos.z,
+                            thread.grid_pos.x,
+                            thread.grid_pos.y,
+                            thread.grid_pos.z,
+                            self.launch_params.as_ref().unwrap().block.0,
+                            self.launch_params.as_ref().unwrap().block.1,
+                            self.launch_params.as_ref().unwrap().block.2,
+                            self.launch_params.as_ref().unwrap().grid.0,
+                            self.launch_params.as_ref().unwrap().grid.1,
+                            self.launch_params.as_ref().unwrap().grid.2,
+                        );
+                        thread.execute_unit.import_inst(insts.clone());
+                        thread
+                            .execute_unit
+                            .execute_all(&mut self.memory, args.clone());
+                    }
                 }
                 pb.inc(1);
             }
