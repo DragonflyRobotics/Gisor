@@ -1,30 +1,50 @@
+//! Lowering: convert `ParseOutput` into the final `ParsedKernel`.
+//!
+//! This is where semantic decisions happen:
+//!   - pick the right `InstType` variant based on (mnemonic, modifiers,
+//!     operand shape)
+//!   - rewrite special cases like `mov.u32 %r, %tid.x` -> `MovTidX`
+//!   - resolve `$label` operands to PC values
+//!   - resolve `[param_name]` operands to parameter placeholder indices
+//!   - encode each operand into a `usize` slot for Zekai's `inst_info.args`
+//!
+//! The parsing phase did none of this — it only produced `RawInstruction`s
+//! that faithfully reflect the PTX source. Lowering is where we commit to
+//! Zekai's execution model.
+
 use std::collections::HashMap;
 
 use crate::parser::ir::{
-    inst_info, ImmediateValue, InstType, LabelMap, ParamMap, PredGuard, RawInstruction, RawOperand,
-    RegBank, SpecialReg,
+    ImmediateValue, LabelMap, ParamMap, PredGuard, RawInstruction, RawOperand, RegBank, SpecialReg,
 };
 use crate::parser::error::ParseError;
 use crate::parser::output::ParsedKernel;
 use crate::parser::parser::ParseOutput;
-use gpu::inst_info::make_inst;
 
-///converts intermediate raw param into final parsed param
+// Import Zekai's instruction types directly from the `gpu` crate.
+// `make_inst` is needed because `inst_info`'s fields are `pub(crate)`
+// — we can't construct the struct from outside that crate.
+use gpu::inst_info::{inst_info, make_inst};
+use gpu::inst_type::InstType;
+
+/// Top-level lowering entry point.
 pub fn lower(parse_out: ParseOutput) -> Result<ParsedKernel, ParseError> {
-    //build the param name -> index map
+    // Build the param name -> index map once, for use in every ld.param
+    // lowering decision.
     let mut param_map: ParamMap = HashMap::new();
     for (i, p) in parse_out.params.iter().enumerate() {
         param_map.insert(p.name.clone(), i);
     }
 
-    //pass 1 - build the label map by walking the raw instructions
+    // Pass 1: build the label map by walking the raw instructions and
+    // counting only real ones.
     let label_map = build_label_map(&parse_out.raw_instructions);
 
-    //pass 2 - emit inst_info for each real instruction
+    // Pass 2: emit inst_info for each real instruction.
     let mut instructions = Vec::new();
     for raw in &parse_out.raw_instructions {
         if raw.mnemonic == ".label" {
-            continue; //pseudo-instructions not emitted
+            continue; // pseudo-instructions are not emitted
         }
         let lowered = lower_instruction(raw, &label_map, &param_map)?;
         instructions.push(lowered);
@@ -37,14 +57,21 @@ pub fn lower(parse_out: ParseOutput) -> Result<ParsedKernel, ParseError> {
     })
 }
 
+// ----------------------------------------------------------------------------
+// Label map construction
+// ----------------------------------------------------------------------------
 
-/// build label_name -> pc map. 
+/// Walk the raw instruction list once and build `label_name -> pc`. The PC
+/// is the index of the next real (non-label) instruction. Multiple labels
+/// can point at the same instruction (e.g. two labels with no instructions
+/// between them).
 fn build_label_map(raw: &[RawInstruction]) -> LabelMap {
     let mut map = LabelMap::new();
     let mut pc: usize = 0;
     for inst in raw {
         if inst.mnemonic == ".label" {
-            //label points at the NEXT real instruction's PC
+            // The label points at the NEXT real instruction's PC, which is
+            // the current `pc` since `.label` entries don't increment it.
             if let Some(RawOperand::Label(s)) = inst.operands.first() {
                 map.insert(s.clone(), pc);
             }
@@ -55,12 +82,17 @@ fn build_label_map(raw: &[RawInstruction]) -> LabelMap {
     map
 }
 
+// ----------------------------------------------------------------------------
+// Per-instruction lowering
+// ----------------------------------------------------------------------------
+
 fn lower_instruction(
     raw: &RawInstruction,
     labels: &LabelMap,
     params: &ParamMap,
 ) -> Result<inst_info, ParseError> {
-    //predicate guards only supported on branch instrs
+    // Branches are the only instructions that legitimately carry a predicate
+    // guard in our supported subset. Reject guards on anything else.
     if let Some(guard) = raw.predicate_guard {
         if raw.mnemonic != "bra" {
             return Err(ParseError::UnsupportedOperandShape {
@@ -72,6 +104,7 @@ fn lower_instruction(
         return lower_branch(raw, Some(guard), labels);
     }
 
+    // Dispatch on mnemonic.
     match raw.mnemonic.as_str() {
         "ld" => lower_ld(raw, params),
         "st" => lower_st(raw),
@@ -84,7 +117,11 @@ fn lower_instruction(
         "neg" => lower_neg(raw),
         "setp" => lower_setp(raw),
         "or" => lower_or(raw),
+        "and" => lower_and(raw),
+        "xor" => lower_xor(raw),
+        "not" => lower_not(raw),
         "shl" => lower_shl(raw),
+        "shr" => lower_shr(raw),
         "cvta" => lower_cvta(raw),
         "cvt" => lower_cvt(raw),
         "ex2" => lower_ex2(raw),
@@ -99,29 +136,30 @@ fn lower_instruction(
     }
 }
 
+// ----------------------------------------------------------------------------
+// Opcode-family lowering helpers
+// ----------------------------------------------------------------------------
 
-//OPCODE LOWERING HELPERS
+/// `ld.param.u64 %rd1, [param_name]` or `ld.global.f32 %f1, [%rd8]`.
 fn lower_ld(raw: &RawInstruction, params: &ParamMap) -> Result<inst_info, ParseError> {
     expect_operand_count(raw, 2)?;
     let dest = reg_index(&raw.operands[0], raw.line)?;
 
     match raw.modifiers.as_slice() {
-        //ld.param.u64
+        // ld.param.u64 %rd, [param_name]
         [m, ty] if m == "param" && ty == "u64" => {
             let arg_idx = param_ref(&raw.operands[1], params, raw.line)?;
             Ok(make_inst(InstType::LdParamU64, vec![dest, arg_idx]))
         }
-        //ld.param.u32
         [m, ty] if m == "param" && ty == "u32" => {
             let arg_idx = param_ref(&raw.operands[1], params, raw.line)?;
             Ok(make_inst(InstType::LdParamU32, vec![dest, arg_idx]))
         }
-        //ld.param.f32
         [m, ty] if m == "param" && ty == "f32" => {
             let arg_idx = param_ref(&raw.operands[1], params, raw.line)?;
             Ok(make_inst(InstType::LdParamF32, vec![dest, arg_idx]))
         }
-        //ld.global.f32
+        // ld.global.f32 %f, [%rd]
         [m, ty] if m == "global" && ty == "f32" => {
             let addr = memref_reg(&raw.operands[1], raw.line)?;
             Ok(make_inst(InstType::LdGlobalF32, vec![dest, addr]))
@@ -131,7 +169,9 @@ fn lower_ld(raw: &RawInstruction, params: &ParamMap) -> Result<inst_info, ParseE
             let addr = memref_reg(&raw.operands[1], raw.line)?;
             Ok(make_inst(InstType::LdGlobalU32, vec![dest, addr]))
         }
-        //ld.global.nc.f32
+        // ld.global.nc.f32 %f, [%rd]  -- non-coherent cached load; same
+        // semantics for our emulator but we preserve the opcode so Zekai
+        // can instrument it separately if he wants.
         [m1, m2, ty] if m1 == "global" && m2 == "nc" && ty == "f32" => {
             let addr = memref_reg(&raw.operands[1], raw.line)?;
             Ok(make_inst(InstType::LdGlobalNcF32, vec![dest, addr]))
@@ -144,6 +184,7 @@ fn lower_ld(raw: &RawInstruction, params: &ParamMap) -> Result<inst_info, ParseE
     }
 }
 
+/// `st.global.f32 [%rd], %f` — note address is args[0], value is args[1].
 fn lower_st(raw: &RawInstruction) -> Result<inst_info, ParseError> {
     expect_operand_count(raw, 2)?;
     match raw.modifiers.as_slice() {
@@ -151,6 +192,11 @@ fn lower_st(raw: &RawInstruction) -> Result<inst_info, ParseError> {
             let addr = memref_reg(&raw.operands[0], raw.line)?;
             let value = reg_index(&raw.operands[1], raw.line)?;
             Ok(make_inst(InstType::StGlobalF32, vec![addr, value]))
+        }
+        [m, ty] if m == "global" && ty == "u32" => {
+            let addr = memref_reg(&raw.operands[0], raw.line)?;
+            let value = reg_index(&raw.operands[1], raw.line)?;
+            Ok(make_inst(InstType::StGlobalU32, vec![addr, value]))
         }
         _ => Err(ParseError::UnknownOpcode {
             line: raw.line,
@@ -160,12 +206,25 @@ fn lower_st(raw: &RawInstruction) -> Result<inst_info, ParseError> {
     }
 }
 
+/// `mov` has several forms:
+///   mov.u32 %r, %tid.x      -> MovTidX [r]          (special register read)
+///   mov.u32 %r, %ntid.y     -> MovNtidY [r]
+///   mov.u32 %r, %ctaid.x    -> MovCtaidX [r]
+///   mov.u32 %r, %nctaid.x   -> MovNctaidX [r]
+///   mov.u32 %r, %r2         -> MovU32 [r, r2]            (reg-to-reg)
+///   mov.u32 %r, <imm>       -> MovU32Imm [r, imm]
+///   mov.u64 %rd, %rd2       -> MovU64 [rd, rd2]
+///   mov.u64 %rd, <imm>      -> MovU64Imm [rd, imm]
+///   mov.f32 %f, 0f...       -> MovF32Imm [f, bits]
+///   mov.f32 %f, %f          -> MovF32 [dest, src]
+///   mov.b32 %r, %f          -> MovB32FromF32 [dest, src]   (bitcast)
+///   mov.f32 %f, %r          -> MovF32FromB32 [dest, src]   (bitcast)
 fn lower_mov(raw: &RawInstruction) -> Result<inst_info, ParseError> {
     expect_operand_count(raw, 2)?;
     let dest_op = &raw.operands[0];
     let src_op = &raw.operands[1];
 
-    //special register sources
+    // Special register sources: these override everything else.
     if let RawOperand::SpecialReg(sr) = src_op {
         let dest = reg_index(dest_op, raw.line)?;
         let opcode = match sr {
@@ -185,7 +244,7 @@ fn lower_mov(raw: &RawInstruction) -> Result<inst_info, ParseError> {
         return Ok(make_inst(opcode, vec![dest]));
     }
 
-    //seperate by type modifier
+    // Dispatch by type modifier (u32, u64, f32, b32) and source kind.
     match raw.modifiers.as_slice() {
         [ty] if ty == "u32" => {
             let dest = reg_index(dest_op, raw.line)?;
@@ -232,6 +291,7 @@ fn lower_mov(raw: &RawInstruction) -> Result<inst_info, ParseError> {
                     Ok(make_inst(InstType::MovF32, vec![dest, *index as usize]))
                 }
                 RawOperand::Register { bank: RegBank::R, index } => {
+                    // mov.f32 %f, %r -> reinterpret integer bits as float
                     Ok(make_inst(
                         InstType::MovF32FromB32,
                         vec![dest, *index as usize],
@@ -245,7 +305,7 @@ fn lower_mov(raw: &RawInstruction) -> Result<inst_info, ParseError> {
             }
         }
         [ty] if ty == "b32" => {
-            //mov.b32 %r, %f
+            // mov.b32 %r, %f -> MovB32FromF32
             let dest = reg_index(dest_op, raw.line)?;
             match src_op {
                 RawOperand::Register { bank: RegBank::F, index } => Ok(make_inst(
@@ -259,23 +319,20 @@ fn lower_mov(raw: &RawInstruction) -> Result<inst_info, ParseError> {
                 }),
             }
         }
-        _ => Err(ParseError::UnknownOpcode {
-            line: raw.line,
-            mnemonic: raw.mnemonic.clone(),
-            modifiers: raw.modifiers.clone(),
-        }),
-    }
-}
-
-fn lower_mad(raw: &RawInstruction) -> Result<inst_info, ParseError> {
-    expect_operand_count(raw, 4)?;
-    match raw.modifiers.as_slice() {
-        [m1, m2] if m1 == "lo" && m2 == "s32" => {
-            let a = reg_index(&raw.operands[0], raw.line)?;
-            let b = reg_index(&raw.operands[1], raw.line)?;
-            let c = reg_index(&raw.operands[2], raw.line)?;
-            let d = reg_index(&raw.operands[3], raw.line)?;
-            Ok(make_inst(InstType::MadLoS32, vec![a, b, c, d]))
+        [ty] if ty == "pred" => {
+            // mov.pred %p, <imm>  -- set predicate to 0 or 1.
+            let dest = reg_index(dest_op, raw.line)?;
+            match src_op {
+                RawOperand::Immediate(imm) => Ok(make_inst(
+                    InstType::MovPred,
+                    vec![dest, imm_to_usize(*imm)],
+                )),
+                _ => Err(ParseError::UnsupportedOperandShape {
+                    line: raw.line,
+                    opcode: format_opcode(raw),
+                    reason: "mov.pred source must be an immediate".to_string(),
+                }),
+            }
         }
         _ => Err(ParseError::UnknownOpcode {
             line: raw.line,
@@ -285,6 +342,56 @@ fn lower_mad(raw: &RawInstruction) -> Result<inst_info, ParseError> {
     }
 }
 
+/// `mad.lo.s32 %dest, %a, %b, %c` -> MadLoS32 [dest, a, b, c].
+/// Also handles `mad.lo.s32 %dest, %a, imm, imm` -> MadLoS32Imm
+/// (common pattern for affine address arithmetic: dst = a * imm1 + imm2).
+fn lower_mad(raw: &RawInstruction) -> Result<inst_info, ParseError> {
+    expect_operand_count(raw, 4)?;
+    match raw.modifiers.as_slice() {
+        [m1, m2] if m1 == "lo" && m2 == "s32" => {
+            // Check operand shape to pick the right variant.
+            let all_regs = raw.operands.iter().all(|op| matches!(op, RawOperand::Register { .. }));
+            if all_regs {
+                let a = reg_index(&raw.operands[0], raw.line)?;
+                let b = reg_index(&raw.operands[1], raw.line)?;
+                let c = reg_index(&raw.operands[2], raw.line)?;
+                let d = reg_index(&raw.operands[3], raw.line)?;
+                return Ok(make_inst(InstType::MadLoS32, vec![a, b, c, d]));
+            }
+            // Try the reg+reg+imm+imm pattern: dst reg, src reg, then two immediates.
+            let dst_is_reg = matches!(&raw.operands[0], RawOperand::Register { .. });
+            let a_is_reg = matches!(&raw.operands[1], RawOperand::Register { .. });
+            let b_is_imm = matches!(&raw.operands[2], RawOperand::Immediate(_));
+            let c_is_imm = matches!(&raw.operands[3], RawOperand::Immediate(_));
+            if dst_is_reg && a_is_reg && b_is_imm && c_is_imm {
+                let dst = reg_index(&raw.operands[0], raw.line)?;
+                let a = reg_index(&raw.operands[1], raw.line)?;
+                let b = match &raw.operands[2] {
+                    RawOperand::Immediate(imm) => imm_to_usize(*imm),
+                    _ => unreachable!(),
+                };
+                let c = match &raw.operands[3] {
+                    RawOperand::Immediate(imm) => imm_to_usize(*imm),
+                    _ => unreachable!(),
+                };
+                return Ok(make_inst(InstType::MadLoS32Imm, vec![dst, a, b, c]));
+            }
+            Err(ParseError::UnsupportedOperandShape {
+                line: raw.line,
+                opcode: format_opcode(raw),
+                reason: "mad.lo.s32 supports either 4 registers or (dst_r, src_r, imm, imm)"
+                    .to_string(),
+            })
+        }
+        _ => Err(ParseError::UnknownOpcode {
+            line: raw.line,
+            mnemonic: raw.mnemonic.clone(),
+            modifiers: raw.modifiers.clone(),
+        }),
+    }
+}
+
+/// `fma.rn.f32 %dest, %a, %b, %c` or `fma.rm.f32 ...`.
 fn lower_fma(raw: &RawInstruction) -> Result<inst_info, ParseError> {
     expect_operand_count(raw, 4)?;
     let opcode = match raw.modifiers.as_slice() {
@@ -306,6 +413,9 @@ fn lower_fma(raw: &RawInstruction) -> Result<inst_info, ParseError> {
     Ok(make_inst(opcode, args))
 }
 
+/// `add.s32 %d, %a, %b` or `add.s32 %d, %a, <imm>`;
+/// `add.s64 %d, %a, %b`;
+/// `add.f32 %d, %a, %b` or `add.f32 %d, %a, 0f...`.
 fn lower_add(raw: &RawInstruction) -> Result<inst_info, ParseError> {
     expect_operand_count(raw, 3)?;
     match raw.modifiers.as_slice() {
@@ -374,6 +484,11 @@ fn lower_sub(raw: &RawInstruction) -> Result<inst_info, ParseError> {
     }
 }
 
+/// `mul.f32 %d, %a, %b` or `mul.wide.s32 %rd, %r, <imm>`.
+///
+/// Per the design note, `mul.wide.s32` always has an immediate third operand
+/// in the PTX we've seen, so we emit `MulWideS32` assuming that. If a
+/// register turns up in slot 2, we error.
 fn lower_mul(raw: &RawInstruction) -> Result<inst_info, ParseError> {
     expect_operand_count(raw, 3)?;
     match raw.modifiers.as_slice() {
@@ -419,6 +534,7 @@ fn lower_neg(raw: &RawInstruction) -> Result<inst_info, ParseError> {
     }
 }
 
+/// `setp.ge.s32 %p, %a, %b/<imm>` or `setp.lt.s32 %p, %a, %b/<imm>`.
 fn lower_setp(raw: &RawInstruction) -> Result<inst_info, ParseError> {
     expect_operand_count(raw, 3)?;
     let p = reg_index(&raw.operands[0], raw.line)?;
@@ -452,6 +568,17 @@ fn lower_setp(raw: &RawInstruction) -> Result<inst_info, ParseError> {
                 line: raw.line,
                 opcode: format_opcode(raw),
                 reason: "third operand of setp.lt.s32 must be register or immediate".to_string(),
+            }),
+        },
+        [cmp, ty] if cmp == "eq" && ty == "b32" => match &raw.operands[2] {
+            RawOperand::Immediate(imm) => Ok(make_inst(
+                InstType::SetpEqB32,
+                vec![p, a, imm_to_usize(*imm)],
+            )),
+            _ => Err(ParseError::UnsupportedOperandShape {
+                line: raw.line,
+                opcode: format_opcode(raw),
+                reason: "setp.eq.b32 third operand must be immediate".to_string(),
             }),
         },
         _ => Err(ParseError::UnknownOpcode {
@@ -504,6 +631,110 @@ fn lower_shl(raw: &RawInstruction) -> Result<inst_info, ParseError> {
     }
 }
 
+/// `shr.u32 %r, %r, <imm>` or `shr.s32 %r, %r, <imm>`.
+/// Signed vs unsigned matters because of sign extension.
+fn lower_shr(raw: &RawInstruction) -> Result<inst_info, ParseError> {
+    expect_operand_count(raw, 3)?;
+    match raw.modifiers.as_slice() {
+        [ty] if ty == "u32" => {
+            let d = reg_index(&raw.operands[0], raw.line)?;
+            let a = reg_index(&raw.operands[1], raw.line)?;
+            match &raw.operands[2] {
+                RawOperand::Immediate(imm) => Ok(make_inst(
+                    InstType::ShrU32,
+                    vec![d, a, imm_to_usize(*imm)],
+                )),
+                _ => Err(ParseError::UnsupportedOperandShape {
+                    line: raw.line,
+                    opcode: format_opcode(raw),
+                    reason: "shr.u32 third operand must be immediate".to_string(),
+                }),
+            }
+        }
+        [ty] if ty == "s32" => {
+            let d = reg_index(&raw.operands[0], raw.line)?;
+            let a = reg_index(&raw.operands[1], raw.line)?;
+            match &raw.operands[2] {
+                RawOperand::Immediate(imm) => Ok(make_inst(
+                    InstType::ShrS32,
+                    vec![d, a, imm_to_usize(*imm)],
+                )),
+                _ => Err(ParseError::UnsupportedOperandShape {
+                    line: raw.line,
+                    opcode: format_opcode(raw),
+                    reason: "shr.s32 third operand must be immediate".to_string(),
+                }),
+            }
+        }
+        _ => Err(ParseError::UnknownOpcode {
+            line: raw.line,
+            mnemonic: raw.mnemonic.clone(),
+            modifiers: raw.modifiers.clone(),
+        }),
+    }
+}
+
+/// `and.b32 %r, %r, <imm>` -- bitwise AND with immediate mask.
+fn lower_and(raw: &RawInstruction) -> Result<inst_info, ParseError> {
+    expect_operand_count(raw, 3)?;
+    match raw.modifiers.as_slice() {
+        [ty] if ty == "b32" => {
+            let d = reg_index(&raw.operands[0], raw.line)?;
+            let a = reg_index(&raw.operands[1], raw.line)?;
+            match &raw.operands[2] {
+                RawOperand::Immediate(imm) => Ok(make_inst(
+                    InstType::AndB32,
+                    vec![d, a, imm_to_usize(*imm)],
+                )),
+                _ => Err(ParseError::UnsupportedOperandShape {
+                    line: raw.line,
+                    opcode: format_opcode(raw),
+                    reason: "and.b32 third operand must be immediate".to_string(),
+                }),
+            }
+        }
+        _ => Err(ParseError::UnknownOpcode {
+            line: raw.line,
+            mnemonic: raw.mnemonic.clone(),
+            modifiers: raw.modifiers.clone(),
+        }),
+    }
+}
+
+/// `xor.pred %p, %p, %p` -- logical XOR on predicates.
+fn lower_xor(raw: &RawInstruction) -> Result<inst_info, ParseError> {
+    expect_operand_count(raw, 3)?;
+    match raw.modifiers.as_slice() {
+        [m] if m == "pred" => {
+            let args = collect_three_regs(raw)?;
+            Ok(make_inst(InstType::XorPred, args))
+        }
+        _ => Err(ParseError::UnknownOpcode {
+            line: raw.line,
+            mnemonic: raw.mnemonic.clone(),
+            modifiers: raw.modifiers.clone(),
+        }),
+    }
+}
+
+/// `not.pred %p, %p` -- logical NOT on a predicate.
+fn lower_not(raw: &RawInstruction) -> Result<inst_info, ParseError> {
+    expect_operand_count(raw, 2)?;
+    match raw.modifiers.as_slice() {
+        [m] if m == "pred" => {
+            let d = reg_index(&raw.operands[0], raw.line)?;
+            let a = reg_index(&raw.operands[1], raw.line)?;
+            Ok(make_inst(InstType::NotPred, vec![d, a]))
+        }
+        _ => Err(ParseError::UnknownOpcode {
+            line: raw.line,
+            mnemonic: raw.mnemonic.clone(),
+            modifiers: raw.modifiers.clone(),
+        }),
+    }
+}
+
+/// `cvta.to.global.u64 %rd_dest, %rd_src` -> CvtaToGlobal [dest, src].
 fn lower_cvta(raw: &RawInstruction) -> Result<inst_info, ParseError> {
     expect_operand_count(raw, 2)?;
     match raw.modifiers.as_slice() {
@@ -520,6 +751,7 @@ fn lower_cvta(raw: &RawInstruction) -> Result<inst_info, ParseError> {
     }
 }
 
+/// `cvt.sat.f32.f32 %f_dest, %f_src` -> CvtSatF32F32 [dest, src].
 fn lower_cvt(raw: &RawInstruction) -> Result<inst_info, ParseError> {
     expect_operand_count(raw, 2)?;
     match raw.modifiers.as_slice() {
@@ -568,6 +800,7 @@ fn lower_rcp(raw: &RawInstruction) -> Result<inst_info, ParseError> {
     }
 }
 
+/// `bra $L`, `@%p bra $L`, `@!%p bra $L`.
 fn lower_branch(
     raw: &RawInstruction,
     guard: Option<PredGuard>,
@@ -596,15 +829,25 @@ fn lower_branch(
             InstType::BraIfNot,
             vec![g.reg as usize, target],
         )),
-        None => Ok(make_inst(InstType::Bra, vec![target])),
+        None => {
+            // Distinguish `bra` (conditional-ready) from `bra.uni` (warp-uniform
+            // unconditional). We treat them as separate opcodes per Zekai's enum.
+            let is_uni = raw.modifiers.iter().any(|m| m == "uni");
+            if is_uni {
+                Ok(make_inst(InstType::BraUni, vec![target]))
+            } else {
+                Ok(make_inst(InstType::Bra, vec![target]))
+            }
+        }
         _ => unreachable!(),
     }
 }
 
+// ----------------------------------------------------------------------------
+// Operand-encoding helpers
+// ----------------------------------------------------------------------------
 
-
-///OPERAND ENCODING HELPERS
-/// Encode a `RawOperand::Register` as its index
+/// Encode a `RawOperand::Register` as its index. Errors on any other kind.
 fn reg_index(op: &RawOperand, line: usize) -> Result<usize, ParseError> {
     match op {
         RawOperand::Register { index, .. } => Ok(*index as usize),
@@ -703,3 +946,264 @@ fn format_opcode(raw: &RawInstruction) -> String {
     let mods: String = raw.modifiers.iter().map(|m| format!(".{m}")).collect();
     format!("{}{}", raw.mnemonic, mods)
 }
+
+
+/* 
+// ----------------------------------------------------------------------------
+// Tests
+// ----------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::parser::lexer::tokenize;
+    use crate::parser::parser::parse_tokens;
+
+    fn parse_and_lower(src: &str) -> ParsedKernel {
+        let parse_out = parse_tokens(tokenize(src)).expect("parse should succeed");
+        lower(parse_out).expect("lower should succeed")
+    }
+
+    #[test]
+    fn ret_only() {
+        let k = parse_and_lower(
+            r#"
+            .visible .entry foo()
+            {
+                ret;
+            }
+        "#,
+        );
+        assert_eq!(k.instructions.len(), 1);
+        assert_eq!(k.instructions[0].inst_type, InstType::Ret);
+        assert!(k.instructions[0].args.is_empty());
+    }
+
+    #[test]
+    fn mad_lo_s32() {
+        let k = parse_and_lower(
+            r#"
+            .visible .entry foo()
+            {
+                mad.lo.s32 %r1, %r5, %r4, %r3;
+                ret;
+            }
+        "#,
+        );
+        assert_eq!(k.instructions[0].inst_type, InstType::MadLoS32);
+        assert_eq!(k.instructions[0].args, vec![1, 5, 4, 3]);
+    }
+
+    #[test]
+    fn mov_tid_x() {
+        let k = parse_and_lower(
+            r#"
+            .visible .entry foo()
+            {
+                mov.u32 %r3, %tid.x;
+                ret;
+            }
+        "#,
+        );
+        assert_eq!(k.instructions[0].inst_type, InstType::MovTidX);
+        assert_eq!(k.instructions[0].args, vec![3]);
+    }
+
+    #[test]
+    fn mul_wide_with_immediate() {
+        let k = parse_and_lower(
+            r#"
+            .visible .entry foo()
+            {
+                mul.wide.s32 %rd5, %r1, 4;
+                ret;
+            }
+        "#,
+        );
+        assert_eq!(k.instructions[0].inst_type, InstType::MulWideS32);
+        assert_eq!(k.instructions[0].args, vec![5, 1, 4]);
+    }
+
+    #[test]
+    fn store_address_is_args_zero() {
+        let k = parse_and_lower(
+            r#"
+            .visible .entry foo()
+            {
+                st.global.f32 [%rd10], %f3;
+                ret;
+            }
+        "#,
+        );
+        assert_eq!(k.instructions[0].inst_type, InstType::StGlobalF32);
+        // args[0] = address register, args[1] = value register
+        assert_eq!(k.instructions[0].args, vec![10, 3]);
+    }
+
+    #[test]
+    fn ld_param_resolves_arg_index() {
+        let k = parse_and_lower(
+            r#"
+            .visible .entry foo(
+                .param .u64 foo_param_0,
+                .param .u64 foo_param_1
+            )
+            {
+                ld.param.u64 %rd2, [foo_param_1];
+                ret;
+            }
+        "#,
+        );
+        assert_eq!(k.instructions[0].inst_type, InstType::LdParamU64);
+        // args[0] = dest register, args[1] = param index (1 for foo_param_1)
+        assert_eq!(k.instructions[0].args, vec![2, 1]);
+    }
+
+    #[test]
+    fn branch_resolves_label_to_pc() {
+        let k = parse_and_lower(
+            r#"
+            .visible .entry foo()
+            {
+                @%p1 bra $L_end;
+                add.s64 %rd1, %rd2, %rd3;
+            $L_end:
+                ret;
+            }
+        "#,
+        );
+        // Real instructions: [0] BraIf, [1] AddS64, [2] Ret
+        // Label $L_end points at instruction index 2.
+        assert_eq!(k.instructions[0].inst_type, InstType::BraIf);
+        assert_eq!(k.instructions[0].args, vec![1, 2]);
+        assert_eq!(k.instructions[1].inst_type, InstType::AddS64);
+        assert_eq!(k.instructions[2].inst_type, InstType::Ret);
+    }
+
+    #[test]
+    fn unconditional_branch() {
+        let k = parse_and_lower(
+            r#"
+            .visible .entry foo()
+            {
+                bra $L_end;
+            $L_end:
+                ret;
+            }
+        "#,
+        );
+        assert_eq!(k.instructions[0].inst_type, InstType::Bra);
+        assert_eq!(k.instructions[0].args, vec![1]);
+    }
+
+    #[test]
+    fn negated_branch() {
+        let k = parse_and_lower(
+            r#"
+            .visible .entry foo()
+            {
+                @!%p2 bra $L_end;
+            $L_end:
+                ret;
+            }
+        "#,
+        );
+        assert_eq!(k.instructions[0].inst_type, InstType::BraIfNot);
+        assert_eq!(k.instructions[0].args, vec![2, 1]);
+    }
+
+    #[test]
+    fn add_s32_with_register_vs_immediate() {
+        let k = parse_and_lower(
+            r#"
+            .visible .entry foo()
+            {
+                add.s32 %r1, %r2, %r3;
+                add.s32 %r4, %r5, 10;
+                ret;
+            }
+        "#,
+        );
+        assert_eq!(k.instructions[0].inst_type, InstType::AddS32);
+        assert_eq!(k.instructions[0].args, vec![1, 2, 3]);
+        assert_eq!(k.instructions[1].inst_type, InstType::AddS32Imm);
+        assert_eq!(k.instructions[1].args, vec![4, 5, 10]);
+    }
+
+    #[test]
+    fn predicate_guard_on_non_branch_errors() {
+        let src = r#"
+            .visible .entry foo()
+            {
+                @%p1 add.s32 %r1, %r2, %r3;
+                ret;
+            }
+        "#;
+        let parse_out = parse_tokens(tokenize(src)).expect("parse ok");
+        let err = lower(parse_out).expect_err("should reject");
+        match err {
+            ParseError::UnsupportedOperandShape { .. } => {}
+            other => panic!("wrong error: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn full_add_kernel_lowers() {
+        // End-to-end: the full addKernel PTX from the project notes should
+        // lower without error and produce the expected number of inst_info.
+        let src = r#"
+.version 9.1
+.target sm_75
+.address_size 64
+
+.visible .entry _Z9addKernelPfS_S_i(
+    .param .u64 _Z9addKernelPfS_S_i_param_0,
+    .param .u64 _Z9addKernelPfS_S_i_param_1,
+    .param .u64 _Z9addKernelPfS_S_i_param_2,
+    .param .u32 _Z9addKernelPfS_S_i_param_3
+)
+{
+    .reg .pred     %p<2>;
+    .reg .f32     %f<4>;
+    .reg .b32     %r<6>;
+    .reg .b64     %rd<11>;
+
+    ld.param.u64     %rd1, [_Z9addKernelPfS_S_i_param_0];
+    ld.param.u64     %rd2, [_Z9addKernelPfS_S_i_param_1];
+    ld.param.u64     %rd3, [_Z9addKernelPfS_S_i_param_2];
+    ld.param.u32     %r2, [_Z9addKernelPfS_S_i_param_3];
+    mov.u32     %r3, %tid.x;
+    mov.u32     %r4, %ntid.x;
+    mov.u32     %r5, %ctaid.x;
+    mad.lo.s32     %r1, %r5, %r4, %r3;
+    setp.ge.s32     %p1, %r1, %r2;
+    @%p1 bra     $L__BB0_2;
+
+    cvta.to.global.u64     %rd4, %rd1;
+    mul.wide.s32     %rd5, %r1, 4;
+    add.s64     %rd6, %rd4, %rd5;
+    cvta.to.global.u64     %rd7, %rd2;
+    add.s64     %rd8, %rd7, %rd5;
+    ld.global.f32     %f1, [%rd8];
+    ld.global.f32     %f2, [%rd6];
+    add.f32     %f3, %f2, %f1;
+    cvta.to.global.u64     %rd9, %rd3;
+    add.s64     %rd10, %rd9, %rd5;
+    st.global.f32     [%rd10], %f3;
+
+$L__BB0_2:
+    ret;
+}
+"#;
+        let k = parse_and_lower(src);
+        // 22 real instructions (the label pseudo doesn't become an inst_info).
+        assert_eq!(k.instructions.len(), 22);
+        // The label `$L__BB0_2` should resolve to PC = 21 (the Ret).
+        // Branch at index 9 (after 4 ld.param, 3 mov, 1 mad, 1 setp = 9).
+        assert_eq!(k.instructions[9].inst_type, InstType::BraIf);
+        assert_eq!(k.instructions[9].args[1], 21); // target PC
+        assert_eq!(k.instructions[21].inst_type, InstType::Ret);
+    }
+}
+
+    */
