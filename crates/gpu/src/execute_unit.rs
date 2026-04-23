@@ -238,6 +238,8 @@ impl execute_unit {
             InstType::SetpNeS32 => {self.setp_ne_s32(a[0], a[1], a[2]) },
             InstType::SetpEqS32Imm => {self.setp_eq_s32_imm(a[0], a[1], a[2] as i32)},
             InstType::SetpNeS32Imm => {self.setp_ne_s32_imm(a[0], a[1], a[2] as i32)},
+
+            InstType::AndB32Imm => { self.and_b32_imm(a[0], a[1], a[2] as u32) },
         }
         self.pc += 1;
     }
@@ -569,6 +571,10 @@ impl execute_unit {
 
     fn and_b32(&mut self, dst: usize, a: usize, b: usize) {
         self.r[dst] = self.r[a] & self.r[b];
+    }
+
+    fn and_b32_imm(&mut self, dst: usize, a: usize, imm: u32) {
+        self.r[dst] = self.r[a] & imm;
     }
 
     fn setp_eq_b32(&mut self, dst: usize, a: usize, b: usize) {

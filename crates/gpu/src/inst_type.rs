@@ -58,6 +58,7 @@ pub enum InstType {
     BraIfNot,
     Ret,
     AndB32,
+    AndB32Imm,
     SetpEqB32,
     XorPred,
     NotPred,
