@@ -32,11 +32,43 @@ pub unsafe extern "C" fn __cudaLaunchKernel(
     );
     let csig = parse_c_signature(sym.demangle().unwrap().as_str()).unwrap();
     unsafe {
-        for i in 0..gpu.num_args.unwrap()-1 {
-            println!("Offset: {}", i as isize);
-            csig.
-            let arg = *(*(args.offset(i as isize)) as *const usize);
-            args_vec.push(arg);
+        for (i, param) in csig.params.iter().enumerate() {
+            if (param.pointer_levels > 0) {
+                let arg = *(*(args.offset(i as isize)) as *const u64);
+                args_vec.push(arg as usize);
+            } else {
+                match param.ptx_type {
+                    ptx_parser::PtxType::U32 => {
+                        let arg = *(*(args.offset(i as isize)) as *const u32);
+                        args_vec.push(arg as usize);
+                    },
+                    ptx_parser::PtxType::U64 => {
+                        let arg = *(*(args.offset(i as isize)) as *const u64);
+                        args_vec.push(arg as usize);
+                    },
+                    ptx_parser::PtxType::S32 => {
+                        let arg = *(*(args.offset(i as isize)) as *const i32);
+                        args_vec.push(arg as usize);
+                    },
+                    ptx_parser::PtxType::S64 => {
+                        let arg = *(*(args.offset(i as isize)) as *const i64);
+                        args_vec.push(arg as usize);
+                    },
+                    ptx_parser::PtxType::F32 => {
+                        let arg = *(*(args.offset(i as isize)) as *const f32);
+                        args_vec.push(arg as usize);
+                    },
+                    ptx_parser::PtxType::B32 => {
+                        let arg = *(*(args.offset(i as isize)) as *const u32);
+                        args_vec.push(arg as usize);
+                    },
+                    ptx_parser::PtxType::B64 => {
+                        let arg = *(*(args.offset(i as isize)) as *const u64);
+                        args_vec.push(arg as usize);
+                    },
+                    ptx_parser::PtxType::Pred => todo!(),
+                }
+            }
         }
         // let d_a = *(*(args.offset(0)) as *const u64);
         // let d_b = *(*(args.offset(1)) as *const u64);
