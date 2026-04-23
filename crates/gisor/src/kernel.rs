@@ -25,20 +25,27 @@ pub unsafe extern "C" fn __cudaLaunchKernel(
     );
     let mut args_vec: Vec<usize> = vec![];
     let mut gpu = GPU0.lock().unwrap();
+    let sym = Symbol::new(gpu.kernel_symbol.as_ref().unwrap()).unwrap();
+    println!(
+        "Device demangled function: {:?}",
+        sym.demangle().unwrap().to_string()
+    );
+    let csig = parse_c_signature(sym.demangle().unwrap().as_str()).unwrap();
     unsafe {
-        // for i in 0..gpu.num_args.unwrap()-1 {
-        //     println!("Offset: {}", i as isize);
-        //     let arg = *(*(args.offset(i as isize)) as *const usize);
-        //     args_vec.push(arg);
-        // }
-        let d_a = *(*(args.offset(0)) as *const u64);
+        for i in 0..gpu.num_args.unwrap()-1 {
+            println!("Offset: {}", i as isize);
+            csig.
+            let arg = *(*(args.offset(i as isize)) as *const usize);
+            args_vec.push(arg);
+        }
+        // let d_a = *(*(args.offset(0)) as *const u64);
         // let d_b = *(*(args.offset(1)) as *const u64);
         // let d_c = *(*(args.offset(2)) as *const u64);
-        let n = *(*(args.offset(1)) as *const i32);
-        args_vec.push(d_a as usize);
+        // let n = *(*(args.offset(3)) as *const i32);
+        // args_vec.push(d_a as usize);
         // args_vec.push(d_b as usize);
         // args_vec.push(d_c as usize);
-        args_vec.push(n as usize);
+        // args_vec.push(n as usize);
         // panic!("");
         
         // println!("+++ Kernel arguments:");

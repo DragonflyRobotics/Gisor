@@ -45,6 +45,10 @@ int main()
     // verify
     for (int i = 0; i < 5; i++) {
         printf("%f + %f = %f\n", h_a[i], h_b[i], h_c[i]);
+        if (h_c[i] != h_a[i] + h_b[i] + 2) {
+            printf("Verification failed at index %d\n", i);
+            return 1;
+        }
     }
 
     cudaFree(d_a);
