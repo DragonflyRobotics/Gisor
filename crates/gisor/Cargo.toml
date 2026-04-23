@@ -13,3 +13,4 @@ gpu = { path = "../gpu" }
 memory = { path = "../memory" }
 cpp_demangle = "0.5.1"
 logos = "0.16.1"
+ptx_parser = { path = "../ptx_parser" }

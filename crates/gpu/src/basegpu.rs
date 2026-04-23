@@ -45,10 +45,11 @@ pub struct LaunchParams {
 pub struct GPU {
     pub memory: Memory,
     pub sms: Vec<SM>,
-    kernel_symbol: Option<String>,
+    pub kernel_symbol: Option<String>,
     launch_params: Option<LaunchParams>,
     raw_ptx: Option<String>,
     pub num_args: Option<usize>,
+    pub kernels: HashMap<String, Vec<inst_info>>
 }
 
 impl BasicGPU for GPU {
@@ -151,16 +152,12 @@ impl BasicGPU for GPU {
     }
 
     fn execute(&mut self, args: Vec<usize>) {
-        let mut insts: Vec<inst_info> = vec![];
-        insts.push(make_inst(InstType::LdParamU64, vec![1, args[0]])); // dst=rd1, addr=0x1000
-        insts.push(make_inst(InstType::CvtaToGlobal, vec![4, 1])); // dst=rd4, src=rd1
-        insts.push(make_inst(InstType::MulWideS32, vec![5, 1, 4])); // dst=rd5, src1=r1, imm=4
-        insts.push(make_inst(InstType::AddS64, vec![6, 4, 5])); // dst=rd6, src1=rd4, src2=rd5
-        insts.push(make_inst(InstType::LdGlobalF32, vec![2, 6])); // dst=f2, addr_reg=rd6
+        let insts = self.kernels.get(self.kernel_symbol.as_deref().unwrap()).unwrap();
         self.num_args = Some(args.len());
         for sm in self.sms.iter_mut() {
             for warp in sm.warps.iter_mut() {
                 for thread in warp.threads.iter_mut() {
+                    println!("Run start");
                     thread.execute_unit.set_execute_id(
                         thread.threads_pos.x,
                         thread.threads_pos.y,
@@ -176,7 +173,8 @@ impl BasicGPU for GPU {
                         self.launch_params.as_ref().unwrap().grid.2,
                     );
                     thread.execute_unit.import_inst(insts.clone());
-                    thread.execute_unit.execute_all();
+                    thread.execute_unit.execute_all(&mut self.memory, args);
+                    println!("Run end");
                 }
             }
         }
@@ -203,5 +201,6 @@ pub static GPU0: Lazy<Mutex<GPU>> = Lazy::new(|| {
         launch_params: None,
         raw_ptx: None,
         num_args: None,
+        kernels: HashMap::new(),
     })
 });
