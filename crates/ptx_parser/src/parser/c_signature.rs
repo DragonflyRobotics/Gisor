@@ -9,10 +9,12 @@
 //!   // Demangled-style signature (from `cpp_demangle` or c++filt):
 //!   addKernel(float*, float*, float*, int)
 //!
-//! Returns a `ParsedKernel` with `name` and `params` filled in, and an
-//! empty `instructions` vector. Useful when Krishna has a kernel's
-//! signature but doesn't have its PTX body, and just wants the
-//! parameter schema for interpreting runtime args.
+//! Returns a `ParsedSignature` with `name` and `params` populated. Each
+//! param includes both the dereferenced type and the number of pointer
+//! levels, so `float*` becomes `{ ptx_type: F32, pointer_levels: 1 }`.
+//! Useful when Krishna has a kernel's signature but doesn't have its PTX
+//! body, and just wants the parameter schema for interpreting runtime
+//! args.
 //!
 //! Grammar:
 //!
@@ -26,10 +28,10 @@
 //! the parser returns `UnexpectedToken` and he can preprocess on his end.
 
 use crate::parser::error::ParseError;
-use crate::parser::output::{ParamInfo, ParsedKernel, PtxType};
+use crate::parser::output::{ParsedSignature, PtxType, SignatureParam};
 
-/// Parse a C function signature into a `ParsedKernel`.
-pub fn parse_c_signature(input: &str) -> Result<ParsedKernel, ParseError> {
+/// Parse a C function signature into a `ParsedSignature`.
+pub fn parse_c_signature(input: &str) -> Result<ParsedSignature, ParseError> {
     let tokens = tokenize_c(input);
     let mut p = CParser {
         tokens,
@@ -184,7 +186,7 @@ impl CParser {
     /// Lookahead: if the first identifier is followed directly by `(`,
     /// the identifier is the function name and there is no return type.
     /// Otherwise, consume a return type then expect the function name.
-    fn parse_signature(&mut self) -> Result<ParsedKernel, ParseError> {
+    fn parse_signature(&mut self) -> Result<ParsedSignature, ParseError> {
         self.skip_newlines();
 
         let name = if self.starts_with_bare_name() {
@@ -198,11 +200,7 @@ impl CParser {
         let params = self.parse_params()?;
         self.expect(&CTok::RParen, "`)` after parameter list")?;
 
-        Ok(ParsedKernel {
-            name,
-            params,
-            instructions: Vec::new(),
-        })
+        Ok(ParsedSignature { name, params })
     }
 
     /// Lookahead: are we at an identifier that's immediately followed by
@@ -274,7 +272,7 @@ impl CParser {
         Ok(parts.join(" "))
     }
 
-    fn parse_params(&mut self) -> Result<Vec<ParamInfo>, ParseError> {
+    fn parse_params(&mut self) -> Result<Vec<SignatureParam>, ParseError> {
         let mut out = Vec::new();
         self.skip_newlines();
 
@@ -319,13 +317,17 @@ impl CParser {
     }
 
     /// param := type_words star* ident?
-    fn parse_single_param(&mut self) -> Result<ParamInfo, ParseError> {
+    ///
+    /// The returned `SignatureParam` carries the *dereferenced* type — for
+    /// `float*`, `ptx_type = F32` and `pointer_levels = 1`. For a plain
+    /// `int`, `ptx_type = S32` and `pointer_levels = 0`.
+    fn parse_single_param(&mut self) -> Result<SignatureParam, ParseError> {
         let type_str = self.parse_type_words()?;
 
-        let mut pointer_levels = 0;
+        let mut pointer_levels: u8 = 0;
         while matches!(self.peek(), Some(CTok::Star)) {
             self.advance();
-            pointer_levels += 1;
+            pointer_levels = pointer_levels.saturating_add(1);
         }
 
         let name = if let Some(CTok::Ident(s)) = self.peek() {
@@ -336,19 +338,19 @@ impl CParser {
             String::new()
         };
 
-        let ptx_type = if pointer_levels > 0 {
-            // Any pointer is 8 bytes on 64-bit systems, matching PTX's
-            // convention of lowering all pointers to `.u64`.
-            PtxType::U64
-        } else {
-            parse_c_type(&type_str).ok_or_else(|| ParseError::UnexpectedToken {
-                line: self.line,
-                expected: "known C type".to_string(),
-                found: type_str,
-            })?
-        };
+        // Unlike before, ptx_type is the dereferenced type even for pointers.
+        // `float*` → ptx_type = F32, pointer_levels = 1.
+        let ptx_type = parse_c_type(&type_str).ok_or_else(|| ParseError::UnexpectedToken {
+            line: self.line,
+            expected: "known C type".to_string(),
+            found: type_str,
+        })?;
 
-        Ok(ParamInfo { name, ptx_type })
+        Ok(SignatureParam {
+            name,
+            ptx_type,
+            pointer_levels,
+        })
     }
 }
 
@@ -445,16 +447,20 @@ mod tests {
         assert_eq!(k.name, "addKernel");
         assert_eq!(k.params.len(), 4);
         assert_eq!(k.params[0].name, "A");
-        assert_eq!(k.params[0].ptx_type, PtxType::U64);
+        assert_eq!(k.params[0].ptx_type, PtxType::F32);
+        assert_eq!(k.params[0].pointer_levels, 1);
         assert_eq!(k.params[3].name, "N");
         assert_eq!(k.params[3].ptx_type, PtxType::S32);
+        assert_eq!(k.params[3].pointer_levels, 0);
     }
 
     #[test]
     fn unsigned_int_compound_type() {
         let k = parse_c_signature("void foo(unsigned int x, int y)").unwrap();
         assert_eq!(k.params[0].ptx_type, PtxType::U32);
+        assert_eq!(k.params[0].pointer_levels, 0);
         assert_eq!(k.params[1].ptx_type, PtxType::S32);
+        assert_eq!(k.params[1].pointer_levels, 0);
     }
 
     #[test]
@@ -485,7 +491,8 @@ mod tests {
         ] {
             let k = parse_c_signature(src).unwrap();
             assert_eq!(k.params.len(), 1, "failed on: {src}");
-            assert_eq!(k.params[0].ptx_type, PtxType::U64);
+            assert_eq!(k.params[0].ptx_type, PtxType::F32);
+            assert_eq!(k.params[0].pointer_levels, 1);
             assert_eq!(k.params[0].name, "p");
         }
     }
@@ -493,14 +500,17 @@ mod tests {
     #[test]
     fn double_pointer() {
         let k = parse_c_signature("void foo(float** p)").unwrap();
-        assert_eq!(k.params[0].ptx_type, PtxType::U64);
+        assert_eq!(k.params[0].ptx_type, PtxType::F32);
+        assert_eq!(k.params[0].pointer_levels, 2);
     }
 
     #[test]
     fn const_qualifier_ignored() {
         let k = parse_c_signature("void foo(const int a, const float* b)").unwrap();
         assert_eq!(k.params[0].ptx_type, PtxType::S32);
-        assert_eq!(k.params[1].ptx_type, PtxType::U64);
+        assert_eq!(k.params[0].pointer_levels, 0);
+        assert_eq!(k.params[1].ptx_type, PtxType::F32);
+        assert_eq!(k.params[1].pointer_levels, 1);
     }
 
     // -- demangled signatures ------------------------------------------
@@ -512,10 +522,12 @@ mod tests {
         assert_eq!(k.params.len(), 4);
         for i in 0..3 {
             assert_eq!(k.params[i].name, "");
-            assert_eq!(k.params[i].ptx_type, PtxType::U64);
+            assert_eq!(k.params[i].ptx_type, PtxType::F32);
+            assert_eq!(k.params[i].pointer_levels, 1);
         }
         assert_eq!(k.params[3].name, "");
         assert_eq!(k.params[3].ptx_type, PtxType::S32);
+        assert_eq!(k.params[3].pointer_levels, 0);
     }
 
     #[test]
@@ -530,8 +542,11 @@ mod tests {
         let k = parse_c_signature("compute(uint64_t, uint32_t, float*)").unwrap();
         assert_eq!(k.name, "compute");
         assert_eq!(k.params[0].ptx_type, PtxType::U64);
+        assert_eq!(k.params[0].pointer_levels, 0);
         assert_eq!(k.params[1].ptx_type, PtxType::U32);
-        assert_eq!(k.params[2].ptx_type, PtxType::U64);
+        assert_eq!(k.params[1].pointer_levels, 0);
+        assert_eq!(k.params[2].ptx_type, PtxType::F32);
+        assert_eq!(k.params[2].pointer_levels, 1);
     }
 
     #[test]
@@ -543,12 +558,13 @@ mod tests {
 
     #[test]
     fn full_sig_also_works_when_signature_unnamed() {
-        // A full signature that happens to have no param names.
         let k = parse_c_signature("void foo(int, float*)").unwrap();
         assert_eq!(k.name, "foo");
         assert_eq!(k.params[0].ptx_type, PtxType::S32);
+        assert_eq!(k.params[0].pointer_levels, 0);
         assert_eq!(k.params[0].name, "");
-        assert_eq!(k.params[1].ptx_type, PtxType::U64);
+        assert_eq!(k.params[1].ptx_type, PtxType::F32);
+        assert_eq!(k.params[1].pointer_levels, 1);
         assert_eq!(k.params[1].name, "");
     }
 }
