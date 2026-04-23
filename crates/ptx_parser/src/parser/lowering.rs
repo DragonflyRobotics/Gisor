@@ -704,7 +704,12 @@ fn lower_shr(raw: &RawInstruction) -> Result<inst_info, ParseError> {
     }
 }
 
-/// `and.b32 %r, %r, <imm>` -- bitwise AND with immediate mask.
+/// `and.b32 %r, %r, %r` or `and.b32 %r, %r, <imm>`.
+///
+/// We emit two distinct opcodes so the executor knows unambiguously
+/// whether args[2] is a register index or a literal value. Without this
+/// distinction, the value `1` could mean either "register %r1" or "the
+/// immediate 1", which would silently miscompute.
 fn lower_and(raw: &RawInstruction) -> Result<inst_info, ParseError> {
     expect_operand_count(raw, 3)?;
     match raw.modifiers.as_slice() {
@@ -712,14 +717,18 @@ fn lower_and(raw: &RawInstruction) -> Result<inst_info, ParseError> {
             let d = reg_index(&raw.operands[0], raw.line)?;
             let a = reg_index(&raw.operands[1], raw.line)?;
             match &raw.operands[2] {
+                RawOperand::Register { .. } => {
+                    let b = reg_index(&raw.operands[2], raw.line)?;
+                    Ok(make_inst(InstType::AndB32, vec![d, a, b]))
+                }
                 RawOperand::Immediate(imm) => Ok(make_inst(
-                    InstType::AndB32,
+                    InstType::AndB32Imm,
                     vec![d, a, imm_to_usize(*imm)],
                 )),
                 _ => Err(ParseError::UnsupportedOperandShape {
                     line: raw.line,
                     opcode: format_opcode(raw),
-                    reason: "and.b32 third operand must be immediate".to_string(),
+                    reason: "and.b32 third operand must be register or immediate".to_string(),
                 }),
             }
         }
