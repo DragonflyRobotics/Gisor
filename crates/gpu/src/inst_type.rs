@@ -68,4 +68,6 @@ pub enum InstType {
     BraUni,
     SetpEqS32,
     SetpNeS32,
+    SetpEqS32Imm,
+    SetpNeS32Imm,
 }

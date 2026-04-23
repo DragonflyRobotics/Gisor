@@ -236,6 +236,8 @@ impl execute_unit {
 
             InstType::SetpEqS32 => {self.setp_eq_s32(a[0], a[1], a[2]) },
             InstType::SetpNeS32 => {self.setp_ne_s32(a[0], a[1], a[2]) },
+            InstType::SetpEqS32Imm => {self.setp_eq_s32_imm(a[0], a[1], a[2] as i32)},
+            InstType::SetpNeS32Imm => {self.setp_ne_s32_imm(a[0], a[1], a[2] as i32)},
         }
         self.pc += 1;
     }
@@ -249,9 +251,9 @@ impl execute_unit {
     pub fn execute_all(&mut self, mem: &mut Memory, args: Vec<usize>) {
         self.pc = 0;                    // reset to start of instruction list
         self.branch_is_taken = false;   // clear branch flag
-        println!("riger");
         while self.pc < self.total_number_inst {
             println!("{:?}", self.inst_list[self.pc as usize]);
+            println!("{:?}", self.pc);
             self.execute_in_seq(mem, args.clone());
         }
     }
@@ -459,7 +461,7 @@ impl execute_unit {
     }
 
     fn setp_ge_s32_imm(&mut self, dst: usize, a: usize, imm: i32) {
-        self.p[dst] = (self.p[a] as i32) >= imm;
+        self.p[dst] = (self.r[a] as i32) >= imm;
     }
 
     fn setp_lt_s32(&mut self, dst: usize, a: usize, b: usize) {
@@ -577,8 +579,16 @@ impl execute_unit {
         self.p[dst] = (self.r[a] as i32) == (self.r[b] as i32);
     }
 
+    fn setp_eq_s32_imm(&mut self, dst: usize, a: usize, imm: i32) {
+        self.p[dst] = self.r[a] == imm as u32;
+    }
+
     fn setp_ne_s32(&mut self, dst: usize, a: usize, b: usize) {
         self.p[dst] = (self.r[a] as i32) != (self.r[b] as i32);
+    }
+
+    fn setp_ne_s32_imm(&mut self, dst: usize, a: usize, imm: i32) {
+        self.p[dst] = self.r[a] != imm as u32;
     }
 
     fn xor_pred(&mut self, dst: usize, a: usize, b: usize) {
