@@ -1,14 +1,13 @@
-use memory::MemoryAddress;
-use crate::basegpu::GPU0;
+use memory::{Memory, MemoryAddress};
 use crate::inst_type::InstType;
 use crate::inst_info::inst_info;
 
 #[derive(Clone)]
 pub struct execute_unit {
-    p: [bool; 256], // predicate registers
-    r: [u32; 256], // gen purpose regs
-    rd: [u64; 256], // double regs
-    f: [f32; 256], // floating point regs
+    pub p: [bool; 256], // predicate registers
+    pub r: [u32; 256], // gen purpose regs
+    pub rd: [u64; 256], // double regs
+    pub f: [f32; 256], // floating point regs
 
     tid_x: u32, // threadId.x
     tid_y: u32, // threadId.y
@@ -65,18 +64,18 @@ impl Default for execute_unit {
         }
     }
 }
-pub fn run_demo(args1: Vec<usize>, args2: Vec<usize>, args3: Vec<usize>, args4: Vec<usize>, args5: Vec<usize>) {
-    let mut insts: Vec<inst_info> = Vec::new();
-    insts.push(inst_info { inst_type: InstType::LdParamU64, args: args1});
-    insts.push(inst_info { inst_type: InstType::CvtaToGlobal, args: args2});
-    insts.push(inst_info { inst_type: InstType::MulWideS32, args: args3});
-    insts.push(inst_info { inst_type: InstType::AddS64, args: args4});
-    insts.push(inst_info { inst_type: InstType::LdGlobalF32, args: args5});
+// pub fn run_demo(args1: Vec<usize>, args2: Vec<usize>, args3: Vec<usize>, args4: Vec<usize>, args5: Vec<usize>) {
+//     let mut insts: Vec<inst_info> = Vec::new();
+//     insts.push(inst_info { inst_type: InstType::LdParamU64, args: args1});
+//     insts.push(inst_info { inst_type: InstType::CvtaToGlobal, args: args2});
+//     insts.push(inst_info { inst_type: InstType::MulWideS32, args: args3});
+//     insts.push(inst_info { inst_type: InstType::AddS64, args: args4});
+//     insts.push(inst_info { inst_type: InstType::LdGlobalF32, args: args5});
 
-    let mut executor: execute_unit = execute_unit::new();
-    executor.inst_list = insts;
-    executor.execute_all();
-}
+//     let mut executor: execute_unit = execute_unit::new();
+//     executor.inst_list = insts;
+    // executor.execute_all();
+// }
 
 impl execute_unit {
     pub(crate) fn new() -> Self {
@@ -110,7 +109,7 @@ impl execute_unit {
         }
     }
 
-    fn set_execute_id(&mut self,
+    pub fn set_execute_id(&mut self,
                       // thread position within block
                       tid_x: u32, tid_y: u32, tid_z: u32,
                       // block position within grid
@@ -136,20 +135,22 @@ impl execute_unit {
         self.nctaid_z = nctaid_z;
     }
 
-    fn import_inst(&mut self, instructions: Vec<inst_info>) {
+    pub fn import_inst(&mut self, instructions: Vec<inst_info>) {
         self.inst_list = instructions;
         self.total_number_inst = self.inst_list.len() as u32;
         self.pc = 0;
     }
 
     // For Debugging a single inst
-    fn execute_single_inst(&mut self, inst: inst_info) {
+    fn execute_single_inst(&mut self, inst: inst_info, mem: &mut Memory) {
         let a = &inst.args; // shorthand
+        println!("{:?}", inst.inst_type);
+        println!("DEBUG: args = {:?}", a);
         match inst.inst_type {
             // --- Loads ---
-            InstType::LdParamU64 => self.load_param_u64(a[0], a[1] as u64),
-            InstType::LdParamU32 => self.load_param_u32(a[0], a[1] as u64),
-            InstType::LdParamF32 => self.load_param_f32(a[0], a[1] as u64),
+            InstType::LdParamU64 => self.load_param_u64(a[0], a[1] as u64, mem),
+            InstType::LdParamU32 => self.load_param_u32(a[0], a[1] as u64, mem),
+            InstType::LdParamF32 => self.load_param_f32(a[0], a[1] as u64, mem),
 
             // --- Mov special registers ---
             InstType::MovTidX => self.mov_u32_tid_x(a[0]),
@@ -198,9 +199,9 @@ impl execute_unit {
             InstType::CvtSatF32F32 => self.cvt_sat_f32_f32(a[0], a[1]),
 
             // --- Memory ---
-            InstType::LdGlobalF32 => self.ld_global_f32(a[0], a[1]),
-            InstType::LdGlobalNcF32 => self.ld_global_nc_f32(a[0], a[1]),
-            InstType::StGlobalF32 => self.st_global_f32(a[0], a[1]),
+            InstType::LdGlobalF32 => self.ld_global_f32(a[0], a[1], mem),
+            InstType::LdGlobalNcF32 => self.ld_global_nc_f32(a[0], a[1], mem),
+            InstType::StGlobalF32 => self.st_global_f32(a[0], a[1], mem),
 
             // --- Predicates ---
             InstType::SetpGeS32 => self.setp_ge_s32(a[0], a[1], a[2]),
@@ -223,50 +224,51 @@ impl execute_unit {
         self.pc += 1;
     }
 
-    fn execute_in_seq(&mut self) {
+    fn execute_in_seq(&mut self, mem: &mut Memory) {
         let inst = self.inst_list[self.pc as usize].clone();
-        self.execute_single_inst(inst);
+        self.execute_single_inst(inst, mem);
+        println!("done");
     }
 
-    fn execute_all(&mut self) {
+    pub fn execute_all(&mut self, mem: &mut Memory, args: Vec<usize>) {
         self.pc = 0;                    // reset to start of instruction list
         self.branch_is_taken = false;   // clear branch flag
 
         while self.pc < self.total_number_inst {
-            self.execute_in_seq();
+            println!("Executing pc: {}", self.pc);
+            self.execute_in_seq(mem);
         }
     }
 
     // Actually ISA insts -- Move and Loads
 
-    fn load_param_u64(&mut self, dst: usize, addr: u64) {
-        let gpu = GPU0.lock().unwrap();
+    fn load_param_u64(&mut self, dst: usize, addr: u64, mem: &Memory) {
         let mut bytes = [0u8; 8];
+        println!("Loading param u64: addr = {}", addr);
         for i in 0..8 {
             let addr = MemoryAddress { address: addr + i as u64 };
-            bytes[i] = gpu.memory.data.get(&addr).unwrap().value;
+            println!("Loading byte {}: addr = {}", i, addr.address);
+            bytes[i] = mem.data.get(&addr).unwrap().value;
         }
         let result = u64::from_le_bytes(bytes);
         self.rd[dst] = result;
     }
 
-    fn load_param_u32(&mut self, dst: usize, addr: u64) {
-        let gpu = GPU0.lock().unwrap();
+    fn load_param_u32(&mut self, dst: usize, addr: u64, mem: &Memory) {
         let mut bytes = [0u8; 4];
         for i in 0..4 {
             let addr = MemoryAddress { address: addr + i as u64 };
-            bytes[i] = gpu.memory.data.get(&addr).unwrap().value;
+            bytes[i] = mem.data.get(&addr).unwrap().value;
         }
         let result = u32::from_le_bytes(bytes);
         self.r[dst] = result;
     }
 
-    fn load_param_f32(&mut self, dst: usize, addr: u64) {
-        let gpu = GPU0.lock().unwrap();
+    fn load_param_f32(&mut self, dst: usize, addr: u64, mem: &Memory) {
         let mut bytes = [0u8; 4];
         for i in 0..4 {
             let addr = MemoryAddress { address: addr + i as u64 };
-            bytes[i] = gpu.memory.data.get(&addr).unwrap().value;
+            bytes[i] = mem.data.get(&addr).unwrap().value;
         }
         let result = f32::from_le_bytes(bytes);
         self.f[dst] = result;
@@ -461,29 +463,28 @@ impl execute_unit {
     // Branch and Conditionals -- End
 
 
-    fn ld_global_f32(&mut self, dst: usize, addr_reg: usize) {
-        let gpu = GPU0.lock().unwrap();
+    fn ld_global_f32(&mut self, dst: usize, addr_reg: usize, mem: &Memory) {
         let addr = self.rd[addr_reg];
         let mut bytes = [0u8; 4];
         for i in 0..4 {
             let addr = MemoryAddress { address: addr + i as u64 };
-            bytes[i] = gpu.memory.data.get(&addr).unwrap().value;
+            bytes[i] = mem.data.get(&addr).unwrap().value;
         }
         let result = f32::from_le_bytes(bytes);
         self.f[dst] = result;
+        println!("LDGLOBALF32: res = {}", result);
     }
 
-    fn ld_global_nc_f32(&mut self, dst: usize, addr: usize) {
-        self.ld_global_f32(dst, addr);
+    fn ld_global_nc_f32(&mut self, dst: usize, addr: usize, mem: &Memory) {
+        self.ld_global_f32(dst, addr, mem);
     }
 
-    fn st_global_f32(&mut self, addr_reg: usize, src: usize) {
-        let mut gpu = GPU0.lock().unwrap();
+    fn st_global_f32(&mut self, addr_reg: usize, src: usize, mem: &mut Memory) {
         let addr = self.rd[addr_reg];
         let bytes = self.f[src].to_le_bytes();
         for i in 0..4 {
             let addr = MemoryAddress { address: addr + i as u64 };
-            if let Some(val) = gpu.memory.data.get_mut(&addr) {
+            if let Some(val) = mem.data.get_mut(&addr) {
                 val.value = bytes[i];
             } else {
                 // Shit Happened

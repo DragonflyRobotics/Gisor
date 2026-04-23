@@ -1,12 +1,12 @@
 use std::{
-    ffi::{CStr, c_char},
-    os::raw::c_void,
+    env, ffi::{CStr, c_char}, os::raw::c_void
 };
 
 use cpp_demangle::Symbol;
 use gpu::basegpu::{BasicGPU, GPU0};
 use memory::MemoryAddress;
 use nvtypes::{CUresult, CUstream, dim3, uint3};
+use ptx_parser::{parse, parse_c_signature};
 
 
 #[unsafe(no_mangle)]
@@ -23,19 +23,32 @@ pub unsafe extern "C" fn __cudaLaunchKernel(
         "gridDim: {:?}, blockDim: {:?}, args: {:?}, sharedMemBytes: {}",
         gridDim, blockDim, args, sharedMemBytes
     );
+    let mut args_vec: Vec<usize> = vec![];
+    let mut gpu = GPU0.lock().unwrap();
     unsafe {
+        // for i in 0..gpu.num_args.unwrap()-1 {
+        //     println!("Offset: {}", i as isize);
+        //     let arg = *(*(args.offset(i as isize)) as *const usize);
+        //     args_vec.push(arg);
+        // }
         let d_a = *(*(args.offset(0)) as *const u64);
         let d_b = *(*(args.offset(1)) as *const u64);
         let d_c = *(*(args.offset(2)) as *const u64);
         let n = *(*(args.offset(3)) as *const i32);
+        args_vec.push(d_a as usize);
+        args_vec.push(d_b as usize);
+        args_vec.push(d_c as usize);
+        args_vec.push(n as usize);
+        // panic!("");
         
-        println!("+++ Kernel arguments:");
-        println!("+++   d_a = 0x{:x}", d_a);
-        println!("+++   d_b = 0x{:x}", d_b);
-        println!("+++   d_c = 0x{:x}", d_c);
-        println!("+++   n = {}", n);
+        // println!("+++ Kernel arguments:");
+        // println!("+++   d_a = 0x{:x}", d_a);
+        // println!("+++   d_b = 0x{:x}", d_b);
+        // println!("+++   d_c = 0x{:x}", d_c);
+        // println!("+++   n = {}", n);
         
     }
+    gpu.execute(args_vec);
     0
 }
 
@@ -67,13 +80,35 @@ pub unsafe extern "C" fn __cudaRegisterFunction(
         "__cudaRegisterFunction called with thread_limit: {}",
         thread_limit
     );
+    let mut gpu = GPU0.lock().unwrap();
+    let ptx = env::var("GISOR_PTX").unwrap_or_default();
+    println!("PTX: {}", ptx);
     unsafe {
-        println!("Host function: {:?}", CStr::from_ptr(hostFun));
+        println!("Host function: {:?}", CStr::from_ptr(deviceFun));
+        let parsed = parse(ptx.as_str());
+        match parsed {
+            Ok(parsed) => {
+                gpu.kernels.insert(CStr::from_ptr(deviceFun).to_string_lossy().to_string(), parsed.instructions);
+            }
+            Err(err) => {
+                panic!("Parse error: {:?}", err);
+            }
+        }
+        gpu.select_kernel(CStr::from_ptr(deviceFun).to_string_lossy().to_string());
         let sym = Symbol::new(CStr::from_ptr(deviceFun).to_str().unwrap()).unwrap();
         println!(
             "Device demangled function: {:?}",
             sym.demangle().unwrap().to_string()
         );
+        let csig = parse_c_signature(sym.demangle().unwrap().as_str());
+        match csig {
+            Ok(csig) => {
+                gpu.num_args = Some(csig.params.len());
+            }
+            Err(err) => {
+                panic!("Parse error: {:?}", err);
+            }
+        }
         // println!("TID: {:?}", *tid);
         // println!("BID: {:?}", *bid);
         // println!("Block Dim: {:?}", *bDim);

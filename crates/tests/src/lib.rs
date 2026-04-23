@@ -1,9 +1,8 @@
 use std::{
     env,
-    io::{BufRead, BufReader},
     path::PathBuf,
-    process::{Command, Stdio},
 };
+
 use gisor::run::launch_test;
 
 #[test]

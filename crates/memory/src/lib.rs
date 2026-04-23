@@ -57,4 +57,5 @@ impl MemoryAddress {
 
 pub struct Memory {
     pub data: HashMap<MemoryAddress, MemoryElement>,
+    pub sizes: HashMap<MemoryAddress, usize>,
 }
