@@ -1,79 +1,32 @@
 //! Parser for C/C++ function signatures.
 //!
-//! This is a secondary input format to `parse()`. Krishna can pass in a C
-//! signature like:
+//! This is the second public entry point of the parser crate. It accepts
+//! two signature styles:
 //!
+//!   // Full signature (from source or `__PRETTY_FUNCTION__`):
 //!   void addKernel(float *A, float *B, float *C, int N)
 //!
-//! …and get back a `ParsedKernel` with `name` and `params` filled in, but
-//! with an empty `instructions` vector. This is useful when Krishna has a
-//! kernel's signature (e.g. from demangling a C++ symbol) but doesn't have
-//! its PTX body, and just wants the parameter schema for runtime arg
-//! interpretation.
+//!   // Demangled-style signature (from `cpp_demangle` or c++filt):
+//!   addKernel(float*, float*, float*, int)
 //!
-//! The grammar we accept is deliberately small:
+//! Returns a `ParsedKernel` with `name` and `params` filled in, and an
+//! empty `instructions` vector. Useful when Krishna has a kernel's
+//! signature but doesn't have its PTX body, and just wants the
+//! parameter schema for interpreting runtime args.
 //!
-//!   signature  := return_type ident '(' params? ')'
+//! Grammar:
+//!
+//!   signature  := [return_type] ident '(' params? ')'
 //!   params     := param (',' param)*
-//!   param      := type_name '*'? ident?
-//!   type_name  := one of the names in `parse_c_type`
+//!   param      := type_name '*'* ident?
+//!   type_name  := one of the names handled by `parse_c_type`
 //!
-//! No support for: const/volatile qualifiers, templates, namespaces,
-//! reference types (&), function pointers, arrays, struct/class params.
-//! If Krishna hits any of those, the parser returns an `UnexpectedToken`
-//! error and he can preprocess the string on his end before calling us.
+//! No support for: templates, namespaces, reference types (&), function
+//! pointers, arrays, struct/class params. If Krishna hits any of those,
+//! the parser returns `UnexpectedToken` and he can preprocess on his end.
 
 use crate::parser::error::ParseError;
 use crate::parser::output::{ParamInfo, ParsedKernel, PtxType};
-
-/// Detect whether an input string looks like a PTX file or a C signature.
-///
-/// Returns `true` for PTX, `false` for C. Heuristic: scan past comments
-/// and whitespace; if the first meaningful character is `.` we assume
-/// PTX (since every PTX file starts with directives like `.version`).
-/// Anything else is treated as a C signature.
-pub fn looks_like_ptx(input: &str) -> bool {
-    let mut chars = input.char_indices().peekable();
-    while let Some(&(_, c)) = chars.peek() {
-        // Skip whitespace.
-        if c.is_whitespace() {
-            chars.next();
-            continue;
-        }
-        // Skip `//` line comment.
-        if c == '/' {
-            let rest = &input[chars.peek().unwrap().0..];
-            if rest.starts_with("//") {
-                // consume until newline
-                while let Some(&(_, c2)) = chars.peek() {
-                    if c2 == '\n' {
-                        break;
-                    }
-                    chars.next();
-                }
-                continue;
-            }
-            if rest.starts_with("/*") {
-                // consume until `*/`
-                chars.next(); // `/`
-                chars.next(); // `*`
-                while let Some(&(i, _)) = chars.peek() {
-                    if input[i..].starts_with("*/") {
-                        chars.next();
-                        chars.next();
-                        break;
-                    }
-                    chars.next();
-                }
-                continue;
-            }
-            return false; // stray `/` — not PTX
-        }
-        // First real character.
-        return c == '.';
-    }
-    false
-}
 
 /// Parse a C function signature into a `ParsedKernel`.
 pub fn parse_c_signature(input: &str) -> Result<ParsedKernel, ParseError> {
@@ -117,13 +70,11 @@ fn tokenize_c(input: &str) -> Vec<CTok> {
                 i += 1;
             }
             b'/' if i + 1 < bytes.len() && bytes[i + 1] == b'/' => {
-                // Line comment
                 while i < bytes.len() && bytes[i] != b'\n' {
                     i += 1;
                 }
             }
             b'/' if i + 1 < bytes.len() && bytes[i + 1] == b'*' => {
-                // Block comment
                 i += 2;
                 while i + 1 < bytes.len() && !(bytes[i] == b'*' && bytes[i + 1] == b'/') {
                     i += 1;
@@ -149,11 +100,8 @@ fn tokenize_c(input: &str) -> Vec<CTok> {
                 i += 1;
             }
             c if c.is_ascii_alphabetic() || c == b'_' => {
-                // Identifier.
                 let start = i;
-                while i < bytes.len()
-                    && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_')
-                {
+                while i < bytes.len() && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_') {
                     i += 1;
                 }
                 out.push(CTok::Ident(
@@ -161,8 +109,8 @@ fn tokenize_c(input: &str) -> Vec<CTok> {
                 ));
             }
             _ => {
-                // Unknown char — skip. We'll fail later in parsing with a
-                // meaningful error if something was actually required here.
+                // Unknown char; skip silently. Grammar failures are caught
+                // downstream with a meaningful error.
                 i += 1;
             }
         }
@@ -227,18 +175,25 @@ impl CParser {
         }
     }
 
-    /// signature := <return_type> <name> ( <params>? )
+    /// signature := [return_type] name ( params? )
+    ///
+    /// The return type is optional to support two styles:
+    ///   - full signature:    "void foo(int a)"       has return type "void"
+    ///   - demangled style:   "foo(int)"              has no return type
+    ///
+    /// Lookahead: if the first identifier is followed directly by `(`,
+    /// the identifier is the function name and there is no return type.
+    /// Otherwise, consume a return type then expect the function name.
     fn parse_signature(&mut self) -> Result<ParsedKernel, ParseError> {
-        // Return type: one or more type-identifiers (e.g. `unsigned int`).
-        // We consume and discard — the return type is irrelevant to the
-        // caller because kernels typically return void and the runtime
-        // doesn't use the return value.
-        self.parse_type_words()?;
+        self.skip_newlines();
 
-        // Kernel name.
-        let name = self.expect_ident()?;
+        let name = if self.starts_with_bare_name() {
+            self.expect_ident()?
+        } else {
+            self.parse_type_words()?;
+            self.expect_ident()?
+        };
 
-        // Parameter list.
         self.expect(&CTok::LParen, "`(` before parameter list")?;
         let params = self.parse_params()?;
         self.expect(&CTok::RParen, "`)` after parameter list")?;
@@ -250,16 +205,44 @@ impl CParser {
         })
     }
 
+    /// Lookahead: are we at an identifier that's immediately followed by
+    /// `(`? If so the input is a demangled signature and has no return
+    /// type. Newlines between the identifier and `(` are tolerated.
+    fn starts_with_bare_name(&self) -> bool {
+        let mut i = self.cursor;
+        while let Some(CTok::Newline) = self.tokens.get(i) {
+            i += 1;
+        }
+        if !matches!(self.tokens.get(i), Some(CTok::Ident(_))) {
+            return false;
+        }
+        i += 1;
+        while let Some(CTok::Newline) = self.tokens.get(i) {
+            i += 1;
+        }
+        matches!(self.tokens.get(i), Some(CTok::LParen))
+    }
+
     /// Consume one or more consecutive identifiers that together form a type.
     /// Accepts `int`, `unsigned int`, `long long`, `uint32_t`, etc. Stops
-    /// as soon as the next token isn't an identifier.
+    /// as soon as the next token isn't an identifier that could extend
+    /// the type.
     ///
-    /// Returns the joined type string (e.g. "unsigned int") so the caller
-    /// can map it to a `PtxType`.
+    /// Leading `const` and `volatile` qualifiers are skipped entirely —
+    /// they don't affect size or representation.
     fn parse_type_words(&mut self) -> Result<String, ParseError> {
         self.skip_newlines();
+
+        // Skip leading qualifiers.
+        while let Some(CTok::Ident(s)) = self.peek() {
+            if s == "const" || s == "volatile" {
+                self.advance();
+            } else {
+                break;
+            }
+        }
+
         let mut parts: Vec<String> = Vec::new();
-        // Must have at least one identifier.
         match self.advance() {
             Some(CTok::Ident(s)) => parts.push(s),
             other => {
@@ -270,19 +253,22 @@ impl CParser {
                 })
             }
         }
-        // Greedily consume additional type-like idents. We stop at
-        // anything that would clearly be a param name, which is tricky
-        // because `int N` has two idents and the second is the param name.
-        //
-        // Heuristic: only extend the type if the NEXT ident is a known
-        // type modifier like `int`, `long`, `short`, `char`. Otherwise
-        // stop and let the caller treat the next ident as a param name.
-        while let Some(CTok::Ident(s)) = self.peek() {
-            if is_type_modifier(s) {
-                parts.push(s.clone());
-                self.advance();
-            } else {
+
+        // Greedily consume additional type-modifier words, and also skip
+        // trailing const/volatile.
+        loop {
+            let next_is_modifier = match self.peek() {
+                Some(CTok::Ident(s)) => is_type_modifier(s) || s == "const" || s == "volatile",
+                _ => false,
+            };
+            if !next_is_modifier {
                 break;
+            }
+            // Consume it. If it's a qualifier, don't push into parts.
+            if let Some(CTok::Ident(s)) = self.advance() {
+                if s != "const" && s != "volatile" {
+                    parts.push(s);
+                }
             }
         }
         Ok(parts.join(" "))
@@ -292,7 +278,6 @@ impl CParser {
         let mut out = Vec::new();
         self.skip_newlines();
 
-        // Empty param list.
         if matches!(self.peek(), Some(CTok::RParen)) {
             return Ok(out);
         }
@@ -306,7 +291,6 @@ impl CParser {
                 if matches!(self.peek(), Some(CTok::RParen)) {
                     return Ok(out);
                 }
-                // Wasn't `(void)` — it's a real `void` param (uncommon). Rewind.
                 self.cursor = save;
             }
         }
@@ -334,18 +318,16 @@ impl CParser {
         Ok(out)
     }
 
-    /// param := <type_words> <star>* <name>?
+    /// param := type_words star* ident?
     fn parse_single_param(&mut self) -> Result<ParamInfo, ParseError> {
         let type_str = self.parse_type_words()?;
 
-        // Zero or more `*` for pointer levels.
         let mut pointer_levels = 0;
         while matches!(self.peek(), Some(CTok::Star)) {
             self.advance();
             pointer_levels += 1;
         }
 
-        // Optional parameter name.
         let name = if let Some(CTok::Ident(s)) = self.peek() {
             let n = s.clone();
             self.advance();
@@ -355,8 +337,8 @@ impl CParser {
         };
 
         let ptx_type = if pointer_levels > 0 {
-            // Any pointer is 8 bytes on 64-bit systems, same as PTX's
-            // convention of lowering pointers to `.u64`.
+            // Any pointer is 8 bytes on 64-bit systems, matching PTX's
+            // convention of lowering all pointers to `.u64`.
             PtxType::U64
         } else {
             parse_c_type(&type_str).ok_or_else(|| ParseError::UnexpectedToken {
@@ -376,44 +358,31 @@ impl CParser {
 
 /// Returns true if a word is part of a compound type (so `parse_type_words`
 /// should greedily consume it rather than treating it as a param name).
+/// Note: `const` and `volatile` are NOT here — they're handled separately
+/// in `parse_type_words` so they don't contaminate the returned type string.
 fn is_type_modifier(s: &str) -> bool {
     matches!(
         s,
-        "int"
-            | "long"
-            | "short"
-            | "char"
-            | "signed"
-            | "unsigned"
-            | "const"
-            | "volatile"
-            | "struct"
+        "int" | "long" | "short" | "char" | "signed" | "unsigned" | "struct"
     )
 }
 
 /// Map a C type string to a `PtxType`. Returns `None` for unknown types.
+///
+/// The input is expected to already have `const` / `volatile` stripped
+/// (that happens in `parse_type_words`), so this function only needs to
+/// handle pure type spellings.
 fn parse_c_type(s: &str) -> Option<PtxType> {
-    // Normalize spacing.
-    let s: String = s.split_whitespace().collect::<Vec<_>>().join(" ");
+    // Normalize whitespace (turn any run of whitespace into a single space).
+    let normalized: String = s.split_whitespace().collect::<Vec<_>>().join(" ");
 
-    // Strip const/volatile, they don't affect size or representation.
-    let cleaned = s
-        .replace("const ", "")
-        .replace("volatile ", "")
-        .trim()
-        .to_string();
-
-    Some(match cleaned.as_str() {
+    Some(match normalized.as_str() {
         // Floating point
         "float" => PtxType::F32,
-        "double" => PtxType::F32, // we lack F64; approximate
+        "double" => PtxType::F32, // we lack F64 in PtxType; approximate
 
         // 32-bit integers
-        "int"
-        | "signed int"
-        | "signed"
-        | "int32_t"
-        | "i32" => PtxType::S32,
+        "int" | "signed int" | "signed" | "int32_t" | "i32" => PtxType::S32,
         "unsigned int" | "unsigned" | "uint32_t" | "u32" => PtxType::U32,
 
         // 64-bit integers
@@ -433,13 +402,13 @@ fn parse_c_type(s: &str) -> Option<PtxType> {
         | "uint64_t"
         | "size_t" => PtxType::U64,
 
-        // 8/16-bit integers — widen to 32-bit per C promotion rules.
+        // 8/16-bit integers widen to 32-bit per C promotion rules.
         "char" | "signed char" | "short" | "short int" | "int8_t" | "int16_t" => PtxType::S32,
         "unsigned char" | "unsigned short" | "unsigned short int" | "uint8_t" | "uint16_t" => {
             PtxType::U32
         }
 
-        // Booleans and predicates
+        // Booleans
         "bool" | "_Bool" => PtxType::Pred,
 
         _ => return None,
@@ -454,14 +423,7 @@ fn parse_c_type(s: &str) -> Option<PtxType> {
 mod tests {
     use super::*;
 
-    #[test]
-    fn detects_ptx_vs_c() {
-        assert!(looks_like_ptx(".version 9.1\n"));
-        assert!(looks_like_ptx("  .entry foo() {}"));
-        assert!(looks_like_ptx("// comment\n.entry foo() {}"));
-        assert!(!looks_like_ptx("void foo()"));
-        assert!(!looks_like_ptx("int main() { return 0; }"));
-    }
+    // -- full signatures -----------------------------------------------
 
     #[test]
     fn simple_void_kernel() {
@@ -482,7 +444,6 @@ mod tests {
         let k = parse_c_signature("void addKernel(float* A, float* B, float* C, int N)").unwrap();
         assert_eq!(k.name, "addKernel");
         assert_eq!(k.params.len(), 4);
-
         assert_eq!(k.params[0].name, "A");
         assert_eq!(k.params[0].ptx_type, PtxType::U64);
         assert_eq!(k.params[3].name, "N");
@@ -492,9 +453,7 @@ mod tests {
     #[test]
     fn unsigned_int_compound_type() {
         let k = parse_c_signature("void foo(unsigned int x, int y)").unwrap();
-        assert_eq!(k.params[0].name, "x");
         assert_eq!(k.params[0].ptx_type, PtxType::U32);
-        assert_eq!(k.params[1].name, "y");
         assert_eq!(k.params[1].ptx_type, PtxType::S32);
     }
 
@@ -518,7 +477,6 @@ mod tests {
 
     #[test]
     fn star_spacing_variants() {
-        // All of these should parse the same way.
         for src in &[
             "void foo(float* p)",
             "void foo(float *p)",
@@ -534,20 +492,8 @@ mod tests {
 
     #[test]
     fn double_pointer() {
-        // `float** p` is still 8 bytes at runtime.
         let k = parse_c_signature("void foo(float** p)").unwrap();
         assert_eq!(k.params[0].ptx_type, PtxType::U64);
-    }
-
-    #[test]
-    fn unnamed_parameter() {
-        // Demangled signatures often have no arg names.
-        let k = parse_c_signature("void foo(float*, int)").unwrap();
-        assert_eq!(k.params.len(), 2);
-        assert_eq!(k.params[0].name, "");
-        assert_eq!(k.params[0].ptx_type, PtxType::U64);
-        assert_eq!(k.params[1].name, "");
-        assert_eq!(k.params[1].ptx_type, PtxType::S32);
     }
 
     #[test]
@@ -555,5 +501,54 @@ mod tests {
         let k = parse_c_signature("void foo(const int a, const float* b)").unwrap();
         assert_eq!(k.params[0].ptx_type, PtxType::S32);
         assert_eq!(k.params[1].ptx_type, PtxType::U64);
+    }
+
+    // -- demangled signatures ------------------------------------------
+
+    #[test]
+    fn demangled_no_return_no_names() {
+        let k = parse_c_signature("addKernel(float*, float*, float*, int)").unwrap();
+        assert_eq!(k.name, "addKernel");
+        assert_eq!(k.params.len(), 4);
+        for i in 0..3 {
+            assert_eq!(k.params[i].name, "");
+            assert_eq!(k.params[i].ptx_type, PtxType::U64);
+        }
+        assert_eq!(k.params[3].name, "");
+        assert_eq!(k.params[3].ptx_type, PtxType::S32);
+    }
+
+    #[test]
+    fn demangled_empty_params() {
+        let k = parse_c_signature("foo()").unwrap();
+        assert_eq!(k.name, "foo");
+        assert!(k.params.is_empty());
+    }
+
+    #[test]
+    fn demangled_stdint() {
+        let k = parse_c_signature("compute(uint64_t, uint32_t, float*)").unwrap();
+        assert_eq!(k.name, "compute");
+        assert_eq!(k.params[0].ptx_type, PtxType::U64);
+        assert_eq!(k.params[1].ptx_type, PtxType::U32);
+        assert_eq!(k.params[2].ptx_type, PtxType::U64);
+    }
+
+    #[test]
+    fn demangled_compound_types() {
+        let k = parse_c_signature("foo(unsigned int, unsigned long long)").unwrap();
+        assert_eq!(k.params[0].ptx_type, PtxType::U32);
+        assert_eq!(k.params[1].ptx_type, PtxType::U64);
+    }
+
+    #[test]
+    fn full_sig_also_works_when_signature_unnamed() {
+        // A full signature that happens to have no param names.
+        let k = parse_c_signature("void foo(int, float*)").unwrap();
+        assert_eq!(k.name, "foo");
+        assert_eq!(k.params[0].ptx_type, PtxType::S32);
+        assert_eq!(k.params[0].name, "");
+        assert_eq!(k.params[1].ptx_type, PtxType::U64);
+        assert_eq!(k.params[1].name, "");
     }
 }

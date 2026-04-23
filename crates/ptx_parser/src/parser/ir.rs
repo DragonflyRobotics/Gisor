@@ -40,7 +40,7 @@ impl Default for RawOperand {
 pub enum RegBank {
     #[default]
     P, //predicate
-    R, //general 32-b int
+    R, //32-b int
     Rd, //64-b int 
     F, //32-b float
 }
@@ -48,26 +48,26 @@ pub enum RegBank {
 /// PTX special-purpose registers
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SpecialReg {
-    //Thread ID within block
+    //thread ID within block
     #[default]
     TidX,
     TidY,
     TidZ,
-    //Block ID within grid
+    //block ID within grid
     CtaidX,
     CtaidY,
     CtaidZ,
-    //Block dimensions (threads per block)
+    //block dimensions (threads per block)
     NtidX,
     NtidY,
     NtidZ,
-    //Grid dimensions (blocks per grid)
+    //grid dimensions (blocks per grid)
     NctaidX,
     NctaidY,
     NctaidZ,
 }
 
-///Literals
+///literals
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub enum ImmediateValue {
     #[default]
@@ -78,11 +78,8 @@ pub enum ImmediateValue {
 
 //maps built during lowering
 
-/// Map from PTX label name (e.g. "$L__BB0_2") to instruction index (PC).
-/// Built during the first pass over `Vec<RawInstruction>`.
-pub type LabelMap = HashMap<String, usize>;
+///map from PTX label name to instruction index
+pub type LabelMap = HashMap<String, usize>; 
 
-/// Map from PTX parameter identifier (e.g. "_Z9addKernelPfS_S_i_param_0")
-/// to its index in `ParsedKernel.params`. Used to resolve `ld.param`
-/// operands into arg placeholder indices.
+///map from PTX parameter identifier to its index in ParsedKernel.params
 pub type ParamMap = HashMap<String, usize>;

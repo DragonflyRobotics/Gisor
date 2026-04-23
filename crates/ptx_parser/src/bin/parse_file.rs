@@ -1,12 +1,17 @@
 //! Small CLI: read a PTX file or a C function signature from disk and
 //! print the parsed result.
 //!
-//! Format is auto-detected. Usage:
+//! Picks which parser to use based on file extension:
+//!   *.ptx   -> ptx_parser::parse          (full PTX parsing)
+//!   *.c, *.cpp, *.txt, other -> ptx_parser::parse_c_signature
+//!
+//! Usage:
 //!   cargo run -p ptx_parser --bin parse_file -- path/to/file.ptx
-//!   cargo run -p ptx_parser --bin parse_file -- path/to/signature.txt
+//!   cargo run -p ptx_parser --bin parse_file -- path/to/signature.c
 
 use std::env;
 use std::fs;
+use std::path::Path;
 use std::process;
 
 fn main() {
@@ -25,10 +30,21 @@ fn main() {
         }
     };
 
-    match ptx_parser::parse(&input) {
+    let is_ptx = Path::new(path)
+        .extension()
+        .map(|e| e.eq_ignore_ascii_case("ptx"))
+        .unwrap_or(false);
+
+    let result = if is_ptx {
+        ptx_parser::parse(&input)
+    } else {
+        ptx_parser::parse_c_signature(&input)
+    };
+
+    match result {
         Ok(kernel) => {
             println!("========================================");
-            println!("  Parsed: {}", path);
+            println!("  Parsed: {} ({})", path, if is_ptx { "PTX" } else { "C signature" });
             println!("========================================");
             println!("kernel name: {}", kernel.name);
             println!();
@@ -43,7 +59,7 @@ fn main() {
             }
             println!();
             if kernel.instructions.is_empty() {
-                println!("instructions: none (input was a C signature, no PTX body)");
+                println!("instructions: none (C signature has no body)");
             } else {
                 println!("instructions ({} total):", kernel.instructions.len());
                 for (pc, inst) in kernel.instructions.iter().enumerate() {
