@@ -65,5 +65,7 @@ pub enum InstType {
     ShrS32,
     MovPred,
     MadLoS32Imm,
-    BraUni
+    BraUni,
+    SetpEqS32,
+    SetpNeS32,
 }
