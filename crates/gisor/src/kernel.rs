@@ -32,12 +32,12 @@ pub unsafe extern "C" fn __cudaLaunchKernel(
         //     args_vec.push(arg);
         // }
         let d_a = *(*(args.offset(0)) as *const u64);
-        let d_b = *(*(args.offset(1)) as *const u64);
-        let d_c = *(*(args.offset(2)) as *const u64);
-        let n = *(*(args.offset(3)) as *const i32);
+        // let d_b = *(*(args.offset(1)) as *const u64);
+        // let d_c = *(*(args.offset(2)) as *const u64);
+        let n = *(*(args.offset(1)) as *const i32);
         args_vec.push(d_a as usize);
-        args_vec.push(d_b as usize);
-        args_vec.push(d_c as usize);
+        // args_vec.push(d_b as usize);
+        // args_vec.push(d_c as usize);
         args_vec.push(n as usize);
         // panic!("");
         

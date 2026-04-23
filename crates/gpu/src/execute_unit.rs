@@ -232,7 +232,10 @@ impl execute_unit {
             InstType::ShrS32 => {self.shr_s32(a[0], a[1], a[2])},
             InstType::MovPred => {self.mov_pred(a[0], a[1] != 0)},
             InstType::MadLoS32Imm => {self.mad_lo_s32_imm(a[0], a[1], a[2] as i32, a[3] as i32)},
-            InstType::BraUni => {self.bra_uni(a[0] as u32); return; }
+            InstType::BraUni => {self.bra_uni(a[0] as u32); return; },
+
+            InstType::SetpEqS32 => {self.setp_eq_s32(a[0], a[1], a[2]) },
+            InstType::SetpNeS32 => {self.setp_ne_s32(a[0], a[1], a[2]) },
         }
         self.pc += 1;
     }
@@ -246,7 +249,7 @@ impl execute_unit {
     pub fn execute_all(&mut self, mem: &mut Memory, args: Vec<usize>) {
         self.pc = 0;                    // reset to start of instruction list
         self.branch_is_taken = false;   // clear branch flag
-
+        println!("riger");
         while self.pc < self.total_number_inst {
             println!("{:?}", self.inst_list[self.pc as usize]);
             self.execute_in_seq(mem, args.clone());
@@ -568,6 +571,14 @@ impl execute_unit {
 
     fn setp_eq_b32(&mut self, dst: usize, a: usize, b: usize) {
         self.p[dst] = self.r[a] == self.r[b];
+    }
+
+    fn setp_eq_s32(&mut self, dst: usize, a: usize, b: usize) {
+        self.p[dst] = (self.r[a] as i32) == (self.r[b] as i32);
+    }
+
+    fn setp_ne_s32(&mut self, dst: usize, a: usize, b: usize) {
+        self.p[dst] = (self.r[a] as i32) != (self.r[b] as i32);
     }
 
     fn xor_pred(&mut self, dst: usize, a: usize, b: usize) {
