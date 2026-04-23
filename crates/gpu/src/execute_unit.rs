@@ -142,15 +142,15 @@ impl execute_unit {
     }
 
     // For Debugging a single inst
-    fn execute_single_inst(&mut self, inst: inst_info, mem: &mut Memory) {
+    fn execute_single_inst(&mut self, inst: inst_info, mem: &mut Memory, args: Vec<usize>) {
         let a = &inst.args; // shorthand
-        println!("{:?}", inst.inst_type);
-        println!("DEBUG: args = {:?}", a);
+        // println!("{:?}", inst.inst_type);
+        // println!("DEBUG: args = {:?}", a);
         match inst.inst_type {
             // --- Loads ---
-            InstType::LdParamU64 => self.load_param_u64(a[0], a[1] as u64, mem),
-            InstType::LdParamU32 => self.load_param_u32(a[0], a[1] as u64, mem),
-            InstType::LdParamF32 => self.load_param_f32(a[0], a[1] as u64, mem),
+            InstType::LdParamU64 => self.load_param_u64(a[0], a[1] as u64, mem, args),
+            InstType::LdParamU32 => self.load_param_u32(a[0], a[1] as u64, mem, args),
+            InstType::LdParamF32 => self.load_param_f32(a[0], a[1] as u64, mem, args),
 
             // --- Mov special registers ---
             InstType::MovTidX => self.mov_u32_tid_x(a[0]),
@@ -199,9 +199,9 @@ impl execute_unit {
             InstType::CvtSatF32F32 => self.cvt_sat_f32_f32(a[0], a[1]),
 
             // --- Memory ---
-            InstType::LdGlobalF32 => self.ld_global_f32(a[0], a[1], mem),
-            InstType::LdGlobalNcF32 => self.ld_global_nc_f32(a[0], a[1], mem),
-            InstType::StGlobalF32 => self.st_global_f32(a[0], a[1], mem),
+            InstType::LdGlobalF32 => self.ld_global_f32(a[0], a[1], mem, args),
+            InstType::LdGlobalNcF32 => self.ld_global_nc_f32(a[0], a[1], mem, args),
+            InstType::StGlobalF32 => self.st_global_f32(a[0], a[1], mem, args),
 
             // --- Predicates ---
             InstType::SetpGeS32 => self.setp_ge_s32(a[0], a[1], a[2]),
@@ -224,10 +224,10 @@ impl execute_unit {
         self.pc += 1;
     }
 
-    fn execute_in_seq(&mut self, mem: &mut Memory) {
+    fn execute_in_seq(&mut self, mem: &mut Memory, args: Vec<usize>) {
         let inst = self.inst_list[self.pc as usize].clone();
-        self.execute_single_inst(inst, mem);
-        println!("done");
+        self.execute_single_inst(inst, mem, args);
+        // println!("done");
     }
 
     pub fn execute_all(&mut self, mem: &mut Memory, args: Vec<usize>) {
@@ -235,43 +235,57 @@ impl execute_unit {
         self.branch_is_taken = false;   // clear branch flag
 
         while self.pc < self.total_number_inst {
-            println!("Executing pc: {}", self.pc);
-            self.execute_in_seq(mem);
+            println!("{:?}", self.inst_list[self.pc as usize]);
+            self.execute_in_seq(mem, args.clone());
         }
     }
 
     // Actually ISA insts -- Move and Loads
 
-    fn load_param_u64(&mut self, dst: usize, addr: u64, mem: &Memory) {
+    fn load_param_u64(&mut self, dst: usize, addr: u64, mem: &Memory, args: Vec<usize>) {
+        /*
         let mut bytes = [0u8; 8];
         println!("Loading param u64: addr = {}", addr);
         for i in 0..8 {
-            let addr = MemoryAddress { address: addr + i as u64 };
+            let addr = MemoryAddress { address: (args[addr as usize] + i) as u64 };
             println!("Loading byte {}: addr = {}", i, addr.address);
             bytes[i] = mem.data.get(&addr).unwrap().value;
         }
         let result = u64::from_le_bytes(bytes);
         self.rd[dst] = result;
+         */
+        println!("{}", args[addr as usize] as u64);
+        self.rd[dst] = args[addr as usize] as u64;
     }
 
-    fn load_param_u32(&mut self, dst: usize, addr: u64, mem: &Memory) {
+    fn load_param_u32(&mut self, dst: usize, addr: u64, mem: &Memory, args: Vec<usize>) {
+        /*
         let mut bytes = [0u8; 4];
+        println!("Loading param u32: addr = {}", addr as usize);
+        println!("{}", args[addr as usize]);
         for i in 0..4 {
-            let addr = MemoryAddress { address: addr + i as u64 };
+            let addr = MemoryAddress { address: (args[addr as usize] + i) as u64 };
             bytes[i] = mem.data.get(&addr).unwrap().value;
         }
         let result = u32::from_le_bytes(bytes);
         self.r[dst] = result;
+         */
+        println!("{}", args[addr as usize] as u32);
+        self.r[dst] = args[addr as usize] as u32;
     }
 
-    fn load_param_f32(&mut self, dst: usize, addr: u64, mem: &Memory) {
+    fn load_param_f32(&mut self, dst: usize, addr: u64, mem: &Memory, args: Vec<usize>) {
+        /*
         let mut bytes = [0u8; 4];
         for i in 0..4 {
-            let addr = MemoryAddress { address: addr + i as u64 };
+            let addr = MemoryAddress { address: (args[addr as usize] + i) as u64 };
             bytes[i] = mem.data.get(&addr).unwrap().value;
         }
         let result = f32::from_le_bytes(bytes);
         self.f[dst] = result;
+         */
+        println!("{}", args[addr as usize] as f32);
+        self.f[dst] = args[addr as usize] as f32;
     }
 
     fn mov_u32_tid_x(&mut self, dst: usize) {
@@ -451,23 +465,27 @@ impl execute_unit {
     fn bra_if(&mut self, pred: usize, target_pc: u32) {
         if (self.p[pred]) {
             self.pc = target_pc;
+        } else {
+            self.pc += 1;
         }
     }
 
     fn bra_if_not(&mut self, pred: usize, target_pc: u32) {
         if !self.p[pred] {
             self.pc = target_pc;
+        } else {
+            self.pc += 1;
         }
     }
 
     // Branch and Conditionals -- End
 
 
-    fn ld_global_f32(&mut self, dst: usize, addr_reg: usize, mem: &Memory) {
+    fn ld_global_f32(&mut self, dst: usize, addr_reg: usize, mem: &Memory, args: Vec<usize>) {
         let addr = self.rd[addr_reg];
         let mut bytes = [0u8; 4];
         for i in 0..4 {
-            let addr = MemoryAddress { address: addr + i as u64 };
+            let addr = MemoryAddress { address: (addr as usize + i) as u64 };
             bytes[i] = mem.data.get(&addr).unwrap().value;
         }
         let result = f32::from_le_bytes(bytes);
@@ -475,15 +493,15 @@ impl execute_unit {
         println!("LDGLOBALF32: res = {}", result);
     }
 
-    fn ld_global_nc_f32(&mut self, dst: usize, addr: usize, mem: &Memory) {
-        self.ld_global_f32(dst, addr, mem);
+    fn ld_global_nc_f32(&mut self, dst: usize, addr: usize, mem: &Memory, args: Vec<usize>) {
+        self.ld_global_f32(dst, addr, mem, args);
     }
 
-    fn st_global_f32(&mut self, addr_reg: usize, src: usize, mem: &mut Memory) {
+    fn st_global_f32(&mut self, addr_reg: usize, src: usize, mem: &mut Memory, args: Vec<usize>) {
         let addr = self.rd[addr_reg];
         let bytes = self.f[src].to_le_bytes();
         for i in 0..4 {
-            let addr = MemoryAddress { address: addr + i as u64 };
+            let addr = MemoryAddress { address: (addr as usize + i) as u64 };
             if let Some(val) = mem.data.get_mut(&addr) {
                 val.value = bytes[i];
             } else {

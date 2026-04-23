@@ -1,6 +1,7 @@
 use std::{collections::HashMap, sync::Mutex};
 
 use csv::Writer;
+use indicatif::{ProgressBar, ProgressStyle};
 use memory::{Memory, MemoryAddress, MemoryElement};
 use nvtypes::dim3;
 use once_cell::sync::Lazy;
@@ -155,6 +156,8 @@ impl BasicGPU for GPU {
         let insts = self.kernels.get(self.kernel_symbol.as_deref().unwrap()).unwrap();
         self.num_args = Some(args.len());
         for sm in self.sms.iter_mut() {
+            let pb = ProgressBar::new(sm.warps.len() as u64);
+            pb.set_style(ProgressStyle::default_bar());
             for warp in sm.warps.iter_mut() {
                 for thread in warp.threads.iter_mut() {
                     println!("Run start");
@@ -173,9 +176,10 @@ impl BasicGPU for GPU {
                         self.launch_params.as_ref().unwrap().grid.2,
                     );
                     thread.execute_unit.import_inst(insts.clone());
-                    thread.execute_unit.execute_all(&mut self.memory, args);
+                    thread.execute_unit.execute_all(&mut self.memory, args.clone());
                     println!("Run end");
                 }
+                pb.inc(1);
             }
         }
     }
