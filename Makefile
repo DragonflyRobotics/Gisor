@@ -21,5 +21,8 @@ build:
 	cargo build
 build_release:
 	cargo build --release
+test:
+	@echo "Testing..."
+	cargo test
 clean:
 	cargo clean
