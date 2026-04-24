@@ -207,7 +207,7 @@ pub static GPU0: Lazy<Mutex<GPU>> = Lazy::new(|| {
             data: HashMap::new(),
             sizes: HashMap::new(),
         },
-        sms: std::iter::repeat_with(|| SM::new(10)).take(5).collect(),
+        sms: std::iter::repeat_with(|| SM::new(280)).take(70).collect(),
         kernel_symbol: None,
         launch_params: None,
         raw_ptx: None,

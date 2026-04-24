@@ -242,6 +242,11 @@ impl execute_unit {
             InstType::SetpNeS32Imm => {self.setp_ne_s32_imm(a[0], a[1], a[2] as i32)},
 
             InstType::AndB32Imm => { self.and_b32_imm(a[0], a[1], a[2] as u32) },
+
+            InstType::SetpLeF32 => { self.setp_le_f32(a[0], a[1], a[2]) },
+            InstType::SetpLtU32 => { self.setp_lt_u32(a[0], a[1], a[2]) },
+            InstType::SetpLtU32Imm => { self.setp_lt_u32_imm(a[0], a[1], a[2] as u32) },
+            InstType::AndPred => { self.and_pred(a[0], a[1], a[2]) },
         }
         self.pc += 1;
     }
@@ -469,11 +474,21 @@ impl execute_unit {
     fn setp_ge_s32_imm(&mut self, dst: usize, a: usize, imm: i32) {
         self.p[dst] = (self.r[a] as i32) >= imm;
     }
-    
+
+    fn setp_le_f32(&mut self, dst: usize, a: usize, b: usize) {
+        self.p[dst] = self.f[a] <= self.f[b];
+    }
+
+    // fn setp_le_f32_imm(&mut self, dst: usize, a: usize, imm_bits: usize) {
+    //     let a_f32 = f32::from_bits(self.f[a] as u32);
+    //     let imm_f32 = f32::from_bits(imm_bits as u32);
+    //     self.p[dst] = a_f32 <= imm_f32;
+    // }
+
+
     fn setp_le_f32_imm(&mut self, dst: usize, a: usize, imm_bits: usize) {
-        let a_f32 = f32::from_bits(self.r[a] as u32);
         let imm_f32 = f32::from_bits(imm_bits as u32);
-        self.p[dst] = a_f32 <= imm_f32;
+        self.p[dst] = self.f[a] <= imm_f32;
     }
 
     fn setp_lt_s32(&mut self, dst: usize, a: usize, b: usize) {
@@ -482,6 +497,14 @@ impl execute_unit {
 
     fn setp_lt_s32_imm(&mut self, dst: usize, a: usize, imm: i32) {
         self.p[dst] = (self.r[a] as i32) < imm;
+    }
+
+    fn setp_lt_u32(&mut self, dst: usize, a: usize, b: usize) {
+        self.p[dst] = self.r[a] < self.r[b];
+    }
+
+    fn setp_lt_u32_imm(&mut self, dst: usize, a: usize, imm: u32) {
+        self.p[dst] = self.r[a]  < imm;
     }
 
     fn or_pred(&mut self, dst: usize, a: usize, b: usize) {
@@ -590,6 +613,10 @@ impl execute_unit {
 
     fn and_b32_imm(&mut self, dst: usize, a: usize, imm: u32) {
         self.r[dst] = self.r[a] & imm;
+    }
+
+    fn and_pred(&mut self, dst: usize, a: usize, b: usize) {
+        self.p[dst] = self.p[a] && self.p[b];
     }
 
     fn setp_eq_b32(&mut self, dst: usize, a: usize, b: usize) {

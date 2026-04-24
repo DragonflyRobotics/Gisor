@@ -597,6 +597,21 @@ fn lower_setp(raw: &RawInstruction) -> Result<inst_info, ParseError> {
                 reason: "third operand of setp.lt.s32 must be register or immediate".to_string(),
             }),
         },
+        [cmp, ty] if cmp == "lt" && ty == "u32" => match &raw.operands[2] {
+            RawOperand::Register { .. } => {
+                let b = reg_index(&raw.operands[2], raw.line)?;
+                Ok(make_inst(InstType::SetpLtU32, vec![p, a, b]))
+            }
+            RawOperand::Immediate(imm) => Ok(make_inst(
+                InstType::SetpLtU32Imm,
+                vec![p, a, imm_to_usize(*imm)],
+            )),
+            _ => Err(ParseError::UnsupportedOperandShape {
+                line: raw.line,
+                opcode: format_opcode(raw),
+                reason: "third operand of setp.lt.u32 must be register or immediate".to_string(),
+            }),
+        },
         [cmp, ty] if cmp == "eq" && ty == "b32" => match &raw.operands[2] {
             RawOperand::Immediate(imm) => Ok(make_inst(
                 InstType::SetpEqB32,
@@ -752,6 +767,21 @@ fn lower_and(raw: &RawInstruction) -> Result<inst_info, ParseError> {
                     InstType::AndB32Imm,
                     vec![d, a, imm_to_usize(*imm)],
                 )),
+                _ => Err(ParseError::UnsupportedOperandShape {
+                    line: raw.line,
+                    opcode: format_opcode(raw),
+                    reason: "and.b32 third operand must be register or immediate".to_string(),
+                }),
+            }
+        }
+        [ty] if ty == "pred" => {
+            let d = reg_index(&raw.operands[0], raw.line)?;
+            let a = reg_index(&raw.operands[1], raw.line)?;
+            match &raw.operands[2] {
+                RawOperand::Register { .. } => {
+                    let b = reg_index(&raw.operands[2], raw.line)?;
+                    Ok(make_inst(InstType::AndPred, vec![d, a, b]))
+                }
                 _ => Err(ParseError::UnsupportedOperandShape {
                     line: raw.line,
                     opcode: format_opcode(raw),

@@ -74,4 +74,8 @@ pub enum InstType {
     SetpNeS32,
     SetpEqS32Imm,
     SetpNeS32Imm,
+    SetpLeF32,
+    SetpLtU32,
+    SetpLtU32Imm,
+    AndPred,
 }
