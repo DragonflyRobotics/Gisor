@@ -2,7 +2,7 @@ use nvtypes::dim3;
 
 use crate::thread::Thread;
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum WarpState {
     Active,
     Stalled,

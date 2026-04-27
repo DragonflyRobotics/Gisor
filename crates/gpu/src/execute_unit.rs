@@ -255,8 +255,17 @@ impl execute_unit {
 
     fn execute_in_seq(&mut self, mem: &mut Memory, args: Vec<usize>) {
         let inst = self.inst_list[self.pc as usize].clone();
+        // println!("Inst: {:?}", inst);
         self.execute_single_inst(inst, mem, args);
-        // println!("done");
+    }
+    
+    pub fn execute_clock(&mut self, mem: &mut Memory, args: Vec<usize>) -> bool {
+        if self.pc >= self.total_number_inst {
+            return true;
+        }
+        self.execute_in_seq(mem, args.clone());
+        // println!("pc: {} | total: {}", self.pc, self.total_number_inst);
+        false
     }
 
     pub fn execute_all(&mut self, mem: &mut Memory, args: Vec<usize>) {
