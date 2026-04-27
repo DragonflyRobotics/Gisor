@@ -11,3 +11,4 @@ once_cell = "1.21.4"
 utils = { path = "../utils" }
 serde = {version="1.0.228", features = ["derive"]}
 indicatif = "0.18.4"
+warp_scheduler = { path = "../warp_scheduler" }

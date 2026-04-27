@@ -78,4 +78,6 @@ pub enum InstType {
     SetpLtU32,
     SetpLtU32Imm,
     AndPred,
+    SubS32,
+    SubS32Imm,
 }

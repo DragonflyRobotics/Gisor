@@ -1,12 +1,10 @@
 use std::{
     collections::{BinaryHeap, HashMap, VecDeque},
+    collections::HashMap,
     sync::Mutex,
 };
 
-use crate::inst_type::InstType;
-use crate::{inst_info::make_inst, warp};
 use csv::Writer;
-use indicatif::{ProgressBar, ProgressStyle};
 use memory::{Memory, MemoryAddress, MemoryElement};
 use nvtypes::dim3;
 use once_cell::sync::Lazy;
@@ -182,6 +180,9 @@ impl BasicGPU for GPU {
             .unwrap();
         self.num_args = Some(args.len());
         let mut work_queue: BinaryHeap<WorkItem> = BinaryHeap::new();
+
+        // active warps based queue here
+        let mut active_warps: Vec<(usize, usize)> = Vec::new();
         for (smi, sm) in self.sms.iter_mut().enumerate() {
             for (warpi, warp) in sm.warps.iter_mut().enumerate() {
                 if warp.state == WarpState::Active {
@@ -207,6 +208,7 @@ impl BasicGPU for GPU {
                         sm_id: smi,
                         warp_id: warpi,
                     });
+                    active_warps.push((smi, warpi));
                 }
             }
         }
@@ -214,6 +216,30 @@ impl BasicGPU for GPU {
             println!("Work queue: {:?}", work_queue.len());
             let work_item = work_queue.pop().unwrap();
             let warp = &mut self.sms[work_item.sm_id].warps[work_item.warp_id];
+
+        while !active_warps.is_empty() {
+            // build a scored list of warps
+            let mut scored: Vec<(usize, usize, usize)> = Vec::new();
+            for item in &active_warps {
+                let smi = item.0;
+                let warpi = item.1;
+
+                let warp = &self.sms[smi].warps[warpi];
+                let divergence = warp.divergence_score();
+
+                scored.push((smi, warpi, divergence));
+            }
+
+            // lower divergence means more active threads, so that warp goes first
+            warp_scheduler::prioritize(&mut scored);
+
+            // take the first warp in the queue
+            let best = scored[0];
+            let smi = best.0;
+            let warpi = best.1;
+
+
+            let warp = &mut self.sms[smi].warps[warpi];
             let mut threads_state: [bool; 32] = [false; 32];
             // I wish i could multithread this but &mut Mem is not Send
             // Making it mutex would defeat point.
@@ -224,6 +250,7 @@ impl BasicGPU for GPU {
                     .execute_clock(&mut self.memory, args.clone());
                 threads_state[i] = done_t;
             }
+
             if threads_state.iter().all(|&t| t) {
                 warp.state = WarpState::InActive;
             } else {
@@ -235,6 +262,7 @@ impl BasicGPU for GPU {
                     sm_id: work_item.sm_id,
                     warp_id: work_item.warp_id,
                 });
+                active_warps.retain(|&(a, b)| !(a == smi && b == warpi));
             }
         }
     }
