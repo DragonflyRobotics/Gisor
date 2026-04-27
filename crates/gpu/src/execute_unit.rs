@@ -247,6 +247,8 @@ impl execute_unit {
             InstType::SetpLtU32 => { self.setp_lt_u32(a[0], a[1], a[2]) },
             InstType::SetpLtU32Imm => { self.setp_lt_u32_imm(a[0], a[1], a[2] as u32) },
             InstType::AndPred => { self.and_pred(a[0], a[1], a[2]) },
+            InstType::SubS32 => {self.sub_s32(a[0], a[1], a[2]) },
+            InstType::SubS32Imm => {self.sub_s32_imm(a[0], a[1], a[2] as i32)},
         }
         self.pc += 1;
     }
@@ -425,6 +427,14 @@ impl execute_unit {
         self.f[dst] = self.f[a] + imm;
     }
 
+    fn sub_s32(&mut self, dst: usize, a: usize, b: usize) {
+        self.r[dst] = (self.r[a] as i32).wrapping_sub(self.r[b] as i32) as u32;
+    }
+
+    fn sub_s32_imm(&mut self, dst: usize, a: usize, imm: i32) {
+        self.r[dst] = (self.r[a] as i32).wrapping_sub(imm) as u32;
+    }
+
     fn sub_f32(&mut self, dst: usize, a: usize, b: usize) {
         self.f[dst] = self.f[a] - self.f[b];
     }
@@ -586,6 +596,7 @@ impl execute_unit {
     }
 
     // TBD, depends on how our global memory works. -- No clue how to categorize
+    // Because of current memory model, works the same as a normal reg move
     fn cvta_to_global_u64(&mut self, dst: usize, src: usize) {
         self.rd[dst] = self.rd[src];
     }
