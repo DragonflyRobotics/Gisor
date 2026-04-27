@@ -142,7 +142,30 @@ static InstInfo lower_mov(const RawInstruction* r) {
 static InstInfo lower_branch(const RawInstruction* r, const RawInstruction* raws, size_t raw_count) {
     InstInfo i = {0};
     size_t pc;
-    i.opcode = Bra;
+    if (!find_label(raws, raw_count, r->operands[0].data.label, &pc)) {
+        fprintf(stderr, "Undefined label when lowering branch");
+        abort();
+    }
+
+    //predicates
+    if (r->has_guard) {
+        i.opcode = r->guard.negated ? BraIfNot : BraIf;
+        i.args[0] = (size_t)r->guard.reg;
+        i.args[1] = pc;
+        i.arg_count = 2;
+        return i;
+    }
+
+    //not guarded
+    bool is_uni = false;
+    for (size_t m = 0; m < r->modifier_count; m++) {
+        if (!strcmp(r->modifiers[m], "uni")) {
+            is_uni = true;
+            break;
+        }
+    }
+
+    i.opcode = is_uni ? BraUni : Bra;
     i.args[0] = pc;
     i.arg_count = 1;
     return i;
@@ -386,14 +409,12 @@ static InstInfo lower_neg(const RawInstruction* r) {
 
     size_t dst = (size_t)r->operands[0].data.reg.index;
     size_t a = (size_t)r->operands[1].data.reg.index;
-    size_t b = (size_t)r->operands[2].data.reg.index;
 
     //only negf32 supported
     if (r->modifier_count == 1 && !strcmp(r->modifiers[0], "f32")) {
-        i.opcode = DivRnF32;
+        i.opcode = NegF32;
         i.args[0] = dst;
         i.args[1] = a;
-        i.args[2] = b;
         i.arg_count = 3;
         return i;
     }
@@ -540,6 +561,31 @@ static InstInfo lower_cvta(const RawInstruction* r) {
     return i;
 }
 
+static InstInfo lower_cvt(const RawInstruction* r) {
+    InstInfo i = {0};
+
+    size_t dst = (size_t)r->operands[0].data.reg.index;
+    size_t src = (size_t)r->operands[1].data.reg.index;
+
+    if (r->modifier_count == 3 && !strcmp(r->modifiers[0], "sat") && !strcmp(r->modifiers[1], "f32") 
+        && !strcmp(r->modifiers[2], "f32")) {
+        i.opcode = CvtSatF32F32;
+        i.args[0] = dst;
+        i.args[1] = src;
+        i.arg_count = 2;
+        return i;
+    }
+    if (r->modifier_count == 3 && !strcmp(r->modifiers[0], "rn") && !strcmp(r->modifiers[1], "f32") 
+        && !strcmp(r->modifiers[2], "s32")) {
+        i.opcode = CvtRnF32S32;
+        i.args[0] = dst;
+        i.args[1] = src;
+        i.arg_count = 2;
+        return i;
+    }
+    return i;
+}
+
 static InstInfo lower_or(const RawInstruction* r) {
     InstInfo i = {0};
 
@@ -553,6 +599,72 @@ static InstInfo lower_or(const RawInstruction* r) {
         i.args[1] = a;
         i.args[2] = b;
         i.arg_count = 3;
+        return i;
+    }
+    return i;
+}
+
+static InstInfo lower_xor(const RawInstruction* r) {
+    InstInfo i = {0};
+
+    size_t dst = (size_t)r->operands[0].data.reg.index;
+    size_t a = (size_t)r->operands[1].data.reg.index;
+    size_t b = (size_t)r->operands[2].data.reg.index;
+
+    if (r->modifier_count == 1 && !strcmp(r->modifiers[0], "pred")) {
+        i.opcode = XorPred;
+        i.args[0] = dst;
+        i.args[1] = a;
+        i.args[2] = b;
+        i.arg_count = 3;
+        return i;
+    }
+    return i;
+}
+
+static InstInfo lower_not(const RawInstruction* r) {
+    InstInfo i = {0};
+
+    size_t dst = (size_t)r->operands[0].data.reg.index;
+    size_t a = (size_t)r->operands[1].data.reg.index;
+
+    if (r->modifier_count == 1 && !strcmp(r->modifiers[0], "pred")) {
+        i.opcode = NotPred;
+        i.args[0] = dst;
+        i.args[1] = a;
+        i.arg_count = 2;
+        return i;
+    }
+    return i;
+}
+
+static InstInfo lower_ex2(const RawInstruction* r) {
+    InstInfo i = {0};
+
+    size_t dst = (size_t)r->operands[0].data.reg.index;
+    size_t src = (size_t)r->operands[1].data.reg.index;
+
+    if (r->modifier_count == 2 && !strcmp(r->modifiers[0], "approx") && !strcmp(r->modifiers[1], "f32")) {
+        i.opcode = Ex2ApproxF32;
+        i.args[0] = dst;
+        i.args[1] = src;
+        i.arg_count = 2;
+        return i;
+    }
+    return i;
+}
+
+static InstInfo lower_rcp(const RawInstruction* r) {
+    InstInfo i = {0};
+
+    size_t dst = (size_t)r->operands[0].data.reg.index;
+    size_t src = (size_t)r->operands[1].data.reg.index;
+
+    if (r->modifier_count == 2 && !strcmp(r->modifiers[0], "rn") && !strcmp(r->modifiers[1], "f32")) {
+        i.opcode = RcpRnF32;
+        i.args[0] = dst;
+        i.args[1] = src;
+        i.arg_count = 2;
         return i;
     }
     return i;
@@ -600,18 +712,45 @@ static InstInfo lower_shr(const RawInstruction* r) {
     return i;
 }
 
+static InstInfo lower_and(const RawInstruction* r) {
+    InstInfo i = {0};
 
+    size_t dst = (size_t)r->operands[0].data.reg.index;
+    size_t a = (size_t)r->operands[1].data.reg.index;
+    const RawOperand* b = &r->operands[2];
 
+    if (r->modifier_count == 1 && !strcmp(r->modifiers[0], "b32")) {
+        if (b->type == RAW_OP_IMMEDIATE) {
+            i.opcode = AndB32Imm;
+            i.args[0] = dst;
+            i.args[1] = a;
+            i.args[2] = imm_to_usize(&b->data.imm);
+            i.arg_count = 3;
+            return i;
+        }
+        i.opcode = AndB32;
+        i.args[0] = dst;
+        i.args[1] = a;
+        i.args[2] = (size_t)b->data.reg.index;
+        i.arg_count = 3;
+        return i;
+    }
+    if (r->modifier_count == 1 && !strcmp(r->modifiers[0], "pred")) {
+        i.opcode = AndPred;
+        i.args[0] = dst;
+        i.args[1] = a;
+        i.args[2] = (size_t)b->data.reg.index;
+        i.arg_count = 3;
+        return i;
+    }
 
-
+    return i;
+}
 
 
 
 static InstInfo lower_instruction(const RawInstruction* r, const RawInstruction* raws, size_t raw_count, 
     const ParamInfo* params, size_t param_count) {
-
-    (void)params;
-    (void)param_count;
 
     if (!strcmp(r->instr_name, "ld")) return lower_ld(r, params, param_count);
     if (!strcmp(r->instr_name, "st")) return lower_st(r);
@@ -623,8 +762,14 @@ static InstInfo lower_instruction(const RawInstruction* r, const RawInstruction*
     if (!strcmp(r->instr_name, "div")) return lower_div(r);
     if (!strcmp(r->instr_name, "neg")) return lower_neg(r);
     if (!strcmp(r->instr_name, "setp")) return lower_setp(r);
+    if (!strcmp(r->instr_name, "and")) return lower_and(r);
+    if (!strcmp(r->instr_name, "xor")) return lower_xor(r);
     if (!strcmp(r->instr_name, "or")) return lower_or(r);
+    if (!strcmp(r->instr_name, "not")) return lower_not(r);
+    if (!strcmp(r->instr_name, "shr")) return lower_shr(r);
+    if (!strcmp(r->instr_name, "shl")) return lower_shl(r);
     if (!strcmp(r->instr_name, "cvta")) return lower_cvta(r);
+    if (!strcmp(r->instr_name, "cvt")) return lower_cvt(r);
     if (!strcmp(r->instr_name, "ret")) return lower_ret(r);
     if (!strcmp(r->instr_name, "mov")) return lower_mov(r);
     if (!strcmp(r->instr_name, "bra")) return lower_branch(r, raws, raw_count);
@@ -632,6 +777,7 @@ static InstInfo lower_instruction(const RawInstruction* r, const RawInstruction*
     InstInfo dummy = {0};
     return dummy;
 }
+
 
 ParsedKernel lower(ParseOutput parsed, Arena* arena) {
     (void)arena;
@@ -645,8 +791,9 @@ ParsedKernel lower(ParseOutput parsed, Arena* arena) {
     for (size_t i = 0; i < parsed.raw_count; i++) {
         const RawInstruction* r = &parsed.raw_instructions[i];
         if (!strcmp(r->instr_name, ".label")) continue;
-        out.instructions[out.instruction_count++] = 
-            lower_instruction(r, parsed.raw_instructions, parsed.raw_count, parsed.params, parsed.param_count);
+        
+        out.instructions[out.instruction_count++] = lower_instruction(r, parsed.raw_instructions, 
+            parsed.raw_count, parsed.params, parsed.param_count);
     }
     return out;
 }
