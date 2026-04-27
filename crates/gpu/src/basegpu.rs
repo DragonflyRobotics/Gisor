@@ -189,7 +189,7 @@ impl BasicGPU for GPU {
             }
         }
         while !work_queue.is_empty() {
-            println!("Work queue: {:?}", work_queue.len());
+            print!("\rWork queue: {:?}", work_queue.len());
             let (smi, warpi) = work_queue.pop_front().unwrap();
             let warp = &mut self.sms[smi].warps[warpi];
             let mut threads_state: [bool; 32] = [false; 32];
@@ -223,7 +223,7 @@ pub static GPU0: Lazy<Mutex<GPU>> = Lazy::new(|| {
             data: HashMap::new(),
             sizes: HashMap::new(),
         },
-        sms: std::iter::repeat_with(|| SM::new(1000)).take(120).collect(),
+        sms: std::iter::repeat_with(|| SM::new(324)).take(72).collect(),
         kernel_symbol: None,
         launch_params: None,
         raw_ptx: None,
