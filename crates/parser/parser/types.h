@@ -124,6 +124,7 @@ typedef enum {
     TOK_FLOAT_BITS, 
     TOK_INT_HEX, TOK_INT_DEC, 
     TOK_ID, TOK_NEWLINE, TOK_EOF,
+    TOK_STAR,
 } TokenType;
 
 typedef struct {

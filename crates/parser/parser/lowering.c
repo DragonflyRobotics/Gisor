@@ -44,7 +44,6 @@ static InstInfo lower_ret(const RawInstruction* r) {
     return i;
 }
 
-
 static InstInfo lower_st(const RawInstruction* r) {
     InstInfo i = {0};
     const RawOperand* addr = r->operands[0].data.mem_ref;

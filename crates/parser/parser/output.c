@@ -3,6 +3,7 @@
 #include "lexer.h"
 #include "lowering.h"
 #include "parser.h"
+#include "c_signature.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -49,4 +50,38 @@ void ptx_parse_destroy(ParsedKernel* k) {
     k->instructions = NULL;
     k->param_count = 0;
     k->instruction_count = 0;
+}
+
+
+ParsedSignature parse_c_signature(const char* source) {
+    Arena arena = arena_create(1 << 16);
+
+    size_t token_count = 0;
+    Token* tokens = tokenize_c(source, &arena, &token_count);
+
+    ParsedSignature sig = parse_c_tokens(tokens, token_count, &arena);
+    
+    sig.name = dup_string(sig.name);
+    for (size_t i = 0; i < sig.param_count; i++) {
+        sig.params[i].name = dup_string(sig.params[i].name);
+    }
+
+    free(tokens);
+    arena_destroy(&arena);
+
+    return sig;
+}
+
+void parse_c_signature_destroy(ParsedSignature* sig) {
+    if (!sig) return;
+    free(sig->name);
+    
+    for (size_t i = 0; i < sig->param_count; i++) {
+        free(sig->params[i].name);
+    }
+    free(sig->params);
+
+    sig->name = NULL;
+    sig->params = NULL;
+    sig->param_count = 0;
 }
