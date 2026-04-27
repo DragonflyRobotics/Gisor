@@ -1,7 +1,10 @@
-use std::{collections::HashMap, sync::Mutex};
+use std::{
+    collections::{HashMap, VecDeque},
+    sync::Mutex,
+};
 
-use crate::inst_info::make_inst;
 use crate::inst_type::InstType;
+use crate::{inst_info::make_inst, warp};
 use csv::Writer;
 use indicatif::{ProgressBar, ProgressStyle};
 use memory::{Memory, MemoryAddress, MemoryElement};
@@ -160,11 +163,10 @@ impl BasicGPU for GPU {
             .get(self.kernel_symbol.as_deref().unwrap())
             .unwrap();
         self.num_args = Some(args.len());
-        for sm in self.sms.iter_mut() {
-            let pb = ProgressBar::new(sm.warps.len() as u64);
-            pb.set_style(ProgressStyle::default_bar());
-            for warp in sm.warps.iter_mut() {
-                if (warp.state == WarpState::Active) {
+        let mut work_queue: VecDeque<(usize, usize)> = VecDeque::new();
+        for (smi, sm) in self.sms.iter_mut().enumerate() {
+            for (warpi, warp) in sm.warps.iter_mut().enumerate() {
+                if warp.state == WarpState::Active {
                     for thread in warp.threads.iter_mut() {
                         thread.execute_unit.set_execute_id(
                             thread.threads_pos.x,
@@ -181,12 +183,26 @@ impl BasicGPU for GPU {
                             self.launch_params.as_ref().unwrap().grid.2,
                         );
                         thread.execute_unit.import_inst(insts.clone());
-                        thread
-                            .execute_unit
-                            .execute_all(&mut self.memory, args.clone());
                     }
+                    work_queue.push_back((smi, warpi));
                 }
-                pb.inc(1);
+            }
+        }
+        while !work_queue.is_empty() {
+            println!("Work queue: {:?}", work_queue.len());
+            let (smi, warpi) = work_queue.pop_front().unwrap();
+            let warp = &mut self.sms[smi].warps[warpi];
+            let mut threads_state: [bool; 32] = [false; 32];
+            for (i, thread) in warp.threads.iter_mut().enumerate() {
+                let done_t = thread
+                    .execute_unit
+                    .execute_clock(&mut self.memory, args.clone());
+                threads_state[i] = done_t;
+            }
+            if threads_state.iter().all(|&t| t) {
+                warp.state = WarpState::InActive;
+            } else {
+                work_queue.push_back((smi, warpi));
             }
         }
     }
@@ -207,7 +223,7 @@ pub static GPU0: Lazy<Mutex<GPU>> = Lazy::new(|| {
             data: HashMap::new(),
             sizes: HashMap::new(),
         },
-        sms: std::iter::repeat_with(|| SM::new(280)).take(70).collect(),
+        sms: std::iter::repeat_with(|| SM::new(1000)).take(120).collect(),
         kernel_symbol: None,
         launch_params: None,
         raw_ptx: None,
