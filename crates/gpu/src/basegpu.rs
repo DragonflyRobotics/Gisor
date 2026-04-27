@@ -229,7 +229,6 @@ impl GPU {
                         );
                         thread.execute_unit.import_inst(insts.clone());
                     }
-
                     active_warps.push((smi, warpi));
                 }
             }
