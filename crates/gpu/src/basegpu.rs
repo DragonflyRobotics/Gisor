@@ -1,6 +1,5 @@
 use std::{
     collections::{BinaryHeap, HashMap, VecDeque},
-    collections::HashMap,
     sync::Mutex,
 };
 
@@ -181,14 +180,17 @@ impl BasicGPU for GPU {
             .unwrap()
             .clone();
         self.num_args = Some(args.len());
-        let mut work_queue: BinaryHeap<WorkItem> = BinaryHeap::new();
 
         let mut active_warps = self.prepare_active_warps(&insts);
 
         while !active_warps.is_empty() {
             let mut ran_warp = false;
 
-            for unit_class in [ExecuteUnitClass::Special, ExecuteUnitClass::Memory, ExecuteUnitClass::Generic] {
+            for unit_class in [
+                ExecuteUnitClass::Special,
+                ExecuteUnitClass::Memory,
+                ExecuteUnitClass::Generic,
+            ] {
                 if self.execute_best_class_warp(&active_warps, unit_class, &args) {
                     ran_warp = true;
                     break;
@@ -199,7 +201,9 @@ impl BasicGPU for GPU {
                 break;
             }
 
-            active_warps.retain(|&(smi, warpi)| self.sms[smi].warps[warpi].state == WarpState::Active);
+            active_warps
+                .retain(|&(smi, warpi)| self.sms[smi].warps[warpi].state == WarpState::Active);
+            println!("Active warps: {}", active_warps.len());
         }
     }
 }
@@ -233,16 +237,15 @@ impl GPU {
                 }
             }
         }
-        while !work_queue.is_empty() {
-            println!("Work queue: {:?}", work_queue.len());
-            let work_item = work_queue.pop().unwrap();
-            let warp = &mut self.sms[work_item.sm_id].warps[work_item.warp_id];
-
         active_warps
     }
 
-    fn execute_best_class_warp( &mut self, active_warps: &[(usize, usize)], unit_class: ExecuteUnitClass, args: &Vec<usize>,) -> bool 
-    {
+    fn execute_best_class_warp(
+        &mut self,
+        active_warps: &[(usize, usize)],
+        unit_class: ExecuteUnitClass,
+        args: &Vec<usize>,
+    ) -> bool {
         let mut scored: Vec<(usize, usize, usize, usize)> = Vec::new();
         let class_pri = if unit_class == ExecuteUnitClass::Special {
             0usize
@@ -253,12 +256,10 @@ impl GPU {
         };
 
         for &(smi, warpi) in active_warps {
-
             let warp = &self.sms[smi].warps[warpi];
             if warp.next_execute_unit_class() != Some(unit_class) {
                 continue;
             }
-
             scored.push((smi, warpi, class_pri, warp.divergence_score()));
         }
 
@@ -270,19 +271,20 @@ impl GPU {
 
         let (smi, warpi, _, _) = scored[0];
 
-            let warp = &mut self.sms[smi].warps[warpi];
-            let mut threads_state: [bool; 32] = [false; 32];
-            for (i, thread) in warp.threads.iter_mut().enumerate() {
-                let done_t = thread
-                    .execute_unit
-                    .execute_clock(&mut self.memory, args.clone());
-                threads_state[i] = done_t;
-            }
+        let warp = &mut self.sms[smi].warps[warpi];
+        let mut threads_state: [bool; 32] = [false; 32];
+        for (i, thread) in warp.threads.iter_mut().enumerate() {
+            let done_t = thread
+                .execute_unit
+                .execute_clock(&mut self.memory, args.clone());
+            threads_state[i] = done_t;
+        }
 
-            if threads_state.iter().all(|&t| t) {
-                warp.state = WarpState::InActive;
-                active_warps.retain(|&(a, b)| !(a == smi && b == warpi));
-            }
+        if threads_state.iter().all(|&t| t) {
+            warp.state = WarpState::InActive;
+            active_warps
+                .to_vec()
+                .retain(|&(a, b)| !(a == smi && b == warpi));
         }
 
         true
@@ -304,7 +306,7 @@ pub static GPU0: Lazy<Mutex<GPU>> = Lazy::new(|| {
             data: HashMap::new(),
             sizes: HashMap::new(),
         },
-        sms: std::iter::repeat_with(|| SM::new(1000)).take(120).collect(),
+        sms: std::iter::repeat_with(|| SM::new(100)).take(120).collect(),
         kernel_symbol: None,
         launch_params: None,
         raw_ptx: None,

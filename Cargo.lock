@@ -187,6 +187,7 @@ dependencies = [
  "once_cell",
  "serde",
  "utils",
+ "warp_scheduler",
 ]
 
 [[package]]
@@ -403,7 +404,6 @@ dependencies = [
 name = "ptx_parser"
 version = "0.1.0"
 dependencies = [
- "cc",
  "gpu",
  "logos 0.14.4",
 ]
@@ -569,6 +569,10 @@ checksum = "81e544489bf3d8ef66c953931f56617f423cd4b5494be343d9b9d3dda037b9a3"
 
 [[package]]
 name = "utils"
+version = "0.1.0"
+
+[[package]]
+name = "warp_scheduler"
 version = "0.1.0"
 
 [[package]]
