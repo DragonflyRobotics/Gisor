@@ -1,5 +1,7 @@
 use std::{
-    env, ffi::{CStr, c_char}, os::raw::c_void
+    env,
+    ffi::{CStr, c_char},
+    os::raw::c_void,
 };
 
 use cpp_demangle::Symbol;
@@ -7,7 +9,6 @@ use gpu::basegpu::{BasicGPU, GPU0};
 use memory::MemoryAddress;
 use nvtypes::{CUresult, CUstream, dim3, uint3};
 use ptx_parser::{parse, parse_c_signature};
-
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn __cudaLaunchKernel(
@@ -41,31 +42,31 @@ pub unsafe extern "C" fn __cudaLaunchKernel(
                     ptx_parser::PtxType::U32 => {
                         let arg = *(*(args.offset(i as isize)) as *const u32);
                         args_vec.push(arg as usize);
-                    },
+                    }
                     ptx_parser::PtxType::U64 => {
                         let arg = *(*(args.offset(i as isize)) as *const u64);
                         args_vec.push(arg as usize);
-                    },
+                    }
                     ptx_parser::PtxType::S32 => {
                         let arg = *(*(args.offset(i as isize)) as *const i32);
                         args_vec.push(arg as usize);
-                    },
+                    }
                     ptx_parser::PtxType::S64 => {
                         let arg = *(*(args.offset(i as isize)) as *const i64);
                         args_vec.push(arg as usize);
-                    },
+                    }
                     ptx_parser::PtxType::F32 => {
                         let arg = *(*(args.offset(i as isize)) as *const u32);
                         args_vec.push(arg as usize);
-                    },
+                    }
                     ptx_parser::PtxType::B32 => {
                         let arg = *(*(args.offset(i as isize)) as *const u32);
                         args_vec.push(arg as usize);
-                    },
+                    }
                     ptx_parser::PtxType::B64 => {
                         let arg = *(*(args.offset(i as isize)) as *const u64);
                         args_vec.push(arg as usize);
-                    },
+                    }
                     ptx_parser::PtxType::Pred => todo!(),
                 }
             }
@@ -79,13 +80,12 @@ pub unsafe extern "C" fn __cudaLaunchKernel(
         // args_vec.push(d_c as usize);
         // args_vec.push(n as usize);
         // panic!("");
-        
+
         // println!("+++ Kernel arguments:");
         // println!("+++   d_a = 0x{:x}", d_a);
         // println!("+++   d_b = 0x{:x}", d_b);
         // println!("+++   d_c = 0x{:x}", d_c);
         // println!("+++   n = {}", n);
-        
     }
     gpu.execute(args_vec);
     0
@@ -127,7 +127,10 @@ pub unsafe extern "C" fn __cudaRegisterFunction(
         let parsed = parse(ptx.as_str());
         match parsed {
             Ok(parsed) => {
-                gpu.kernels.insert(CStr::from_ptr(deviceFun).to_string_lossy().to_string(), parsed.instructions);
+                gpu.kernels.insert(
+                    CStr::from_ptr(deviceFun).to_string_lossy().to_string(),
+                    parsed.instructions,
+                );
             }
             Err(err) => {
                 panic!("Parse error: {:?}", err);
@@ -189,7 +192,6 @@ pub unsafe extern "C" fn __cudaPushCallConfiguration(
     );
     let mut gpu = GPU0.lock().unwrap();
     gpu.set_launch_params(gridDim, blockDim);
-
 
     0
 }

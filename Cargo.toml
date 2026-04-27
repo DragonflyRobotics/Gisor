@@ -6,7 +6,6 @@ members = [
     "crates/gisor_launch", 
     "xtask", "crates/memory", 
     "crates/utils", "crates/gpu" , 
-    "crates/warp_scheduler",
     "crates/ptx_parser"
 ]
 resolver = "3"
