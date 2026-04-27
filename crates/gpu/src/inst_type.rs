@@ -1,3 +1,5 @@
+use crate::execute_unit::ExecuteUnitClass;
+
 #[derive(Default, Clone, Debug)]
 pub enum InstType {
     #[default]
@@ -78,4 +80,29 @@ pub enum InstType {
     SetpLtU32,
     SetpLtU32Imm,
     AndPred,
+    SubS32,
+    SubS32Imm,
+}
+
+impl InstType {
+    pub fn execute_unit_class(&self) -> ExecuteUnitClass {
+        match self {
+            // Memory ops req memory execute units
+            InstType::LdParamU64
+            | InstType::LdParamU32
+            | InstType::LdParamF32
+            | InstType::CvtaToGlobal
+            | InstType::LdGlobalU32
+            | InstType::LdGlobalF32
+            | InstType::LdGlobalNcF32
+            | InstType::StGlobalU32
+            | InstType::StGlobalF32 => ExecuteUnitClass::Memory,
+
+            // special float op
+            InstType::Ex2ApproxF32 => ExecuteUnitClass::Special,
+
+            // everything else can run on anything
+            _ => ExecuteUnitClass::Generic,
+        }
+    }
 }
