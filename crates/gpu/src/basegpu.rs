@@ -1,12 +1,9 @@
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::HashMap,
     sync::Mutex,
 };
 
-use crate::inst_type::InstType;
-use crate::{inst_info::make_inst, warp};
 use csv::Writer;
-use indicatif::{ProgressBar, ProgressStyle};
 use memory::{Memory, MemoryAddress, MemoryElement};
 use nvtypes::dim3;
 use once_cell::sync::Lazy;
@@ -163,7 +160,9 @@ impl BasicGPU for GPU {
             .get(self.kernel_symbol.as_deref().unwrap())
             .unwrap();
         self.num_args = Some(args.len());
-        let mut work_queue: VecDeque<(usize, usize)> = VecDeque::new();
+
+        // active warps based queue here
+        let mut active_warps: Vec<(usize, usize)> = Vec::new();
         for (smi, sm) in self.sms.iter_mut().enumerate() {
             for (warpi, warp) in sm.warps.iter_mut().enumerate() {
                 if warp.state == WarpState::Active {
@@ -184,13 +183,33 @@ impl BasicGPU for GPU {
                         );
                         thread.execute_unit.import_inst(insts.clone());
                     }
-                    work_queue.push_back((smi, warpi));
+                    active_warps.push((smi, warpi));
                 }
             }
         }
-        while !work_queue.is_empty() {
-            println!("Work queue: {:?}", work_queue.len());
-            let (smi, warpi) = work_queue.pop_front().unwrap();
+
+        while !active_warps.is_empty() {
+            // build a scored list of warps
+            let mut scored: Vec<(usize, usize, usize)> = Vec::new();
+            for item in &active_warps {
+                let smi = item.0;
+                let warpi = item.1;
+
+                let warp = &self.sms[smi].warps[warpi];
+                let divergence = warp.divergence_score();
+
+                scored.push((smi, warpi, divergence));
+            }
+
+            // lower divergence means more active threads, so that warp goes first
+            warp_scheduler::prioritize(&mut scored);
+
+            // take the first warp in the queue
+            let best = scored[0];
+            let smi = best.0;
+            let warpi = best.1;
+
+
             let warp = &mut self.sms[smi].warps[warpi];
             let mut threads_state: [bool; 32] = [false; 32];
             for (i, thread) in warp.threads.iter_mut().enumerate() {
@@ -199,10 +218,10 @@ impl BasicGPU for GPU {
                     .execute_clock(&mut self.memory, args.clone());
                 threads_state[i] = done_t;
             }
+
             if threads_state.iter().all(|&t| t) {
                 warp.state = WarpState::InActive;
-            } else {
-                work_queue.push_back((smi, warpi));
+                active_warps.retain(|&(a, b)| !(a == smi && b == warpi));
             }
         }
     }

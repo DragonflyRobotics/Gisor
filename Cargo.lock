@@ -187,6 +187,7 @@ dependencies = [
  "once_cell",
  "serde",
  "utils",
+ "warp_scheduler",
 ]
 
 [[package]]

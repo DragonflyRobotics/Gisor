@@ -266,6 +266,11 @@ impl execute_unit {
         false
     }
 
+    // return true when this thread's execute list is finished
+    pub fn is_done(&self) -> bool {
+        self.pc >= self.total_number_inst
+    }
+
     pub fn execute_all(&mut self, mem: &mut Memory, args: Vec<usize>) {
         self.pc = 0;                    // reset to start of instruction list
         self.branch_is_taken = false;   // clear branch flag
