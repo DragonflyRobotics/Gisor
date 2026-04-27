@@ -1,3 +1,4 @@
+// Made with the help of AI to understand CUDA syntax and the Mandelbrot set
 #include <stdio.h>
 #include <cuda_runtime.h>
 
@@ -83,23 +84,6 @@ int main()
     
     save_pgm("mandelbrot.pgm", h_output, WIDTH, HEIGHT);
     printf("Saved mandelbrot.pgm\n");
-    
-    // Print a small ASCII preview of center region
-    printf("\nASCII preview (center 32x16 region):\n");
-    const char *chars = " .,:-=+*#%@";
-    int start_x = WIDTH / 2 - 16;
-    int start_y = HEIGHT / 2 - 8;
-    
-    for (int y = 0; y < 16; y++) {
-        for (int x = 0; x < 32; x++) {
-            int px = start_x + x;
-            int py = start_y + y;
-            int iter = h_output[py * WIDTH + px];
-            int char_idx = (iter * 10) / MAX_ITER;
-            printf("%c", chars[char_idx]);
-        }
-        printf("\n");
-    }
     
     cudaFree(d_output);
     free(h_output);

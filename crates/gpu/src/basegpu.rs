@@ -1,5 +1,5 @@
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::{BinaryHeap, HashMap, VecDeque},
     sync::Mutex,
 };
 
@@ -18,6 +18,24 @@ use crate::{
     sm::SM,
     warp::{Warp, WarpState},
 };
+
+#[derive(PartialEq, Eq, Clone, Debug)]
+struct WorkItem {
+    priority: usize,
+    sm_id: usize,
+    warp_id: usize,
+}
+
+impl Ord for WorkItem {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.priority.cmp(&other.priority)
+    }
+}
+impl PartialOrd for WorkItem {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
 
 #[derive(Serialize)]
 struct ThreadRecord {
@@ -163,7 +181,7 @@ impl BasicGPU for GPU {
             .get(self.kernel_symbol.as_deref().unwrap())
             .unwrap();
         self.num_args = Some(args.len());
-        let mut work_queue: VecDeque<(usize, usize)> = VecDeque::new();
+        let mut work_queue: BinaryHeap<WorkItem> = BinaryHeap::new();
         for (smi, sm) in self.sms.iter_mut().enumerate() {
             for (warpi, warp) in sm.warps.iter_mut().enumerate() {
                 if warp.state == WarpState::Active {
@@ -184,15 +202,22 @@ impl BasicGPU for GPU {
                         );
                         thread.execute_unit.import_inst(insts.clone());
                     }
-                    work_queue.push_back((smi, warpi));
+                    work_queue.push(WorkItem {
+                        priority: 1,
+                        sm_id: smi,
+                        warp_id: warpi,
+                    });
                 }
             }
         }
         while !work_queue.is_empty() {
             println!("Work queue: {:?}", work_queue.len());
-            let (smi, warpi) = work_queue.pop_front().unwrap();
-            let warp = &mut self.sms[smi].warps[warpi];
+            let work_item = work_queue.pop().unwrap();
+            let warp = &mut self.sms[work_item.sm_id].warps[work_item.warp_id];
             let mut threads_state: [bool; 32] = [false; 32];
+            // I wish i could multithread this but &mut Mem is not Send
+            // Making it mutex would defeat point.
+            // Use DashMap later?????
             for (i, thread) in warp.threads.iter_mut().enumerate() {
                 let done_t = thread
                     .execute_unit
@@ -202,7 +227,14 @@ impl BasicGPU for GPU {
             if threads_state.iter().all(|&t| t) {
                 warp.state = WarpState::InActive;
             } else {
-                work_queue.push_back((smi, warpi));
+                let priority = threads_state.iter().filter(|&t| *t == true).count();
+                println!("{:?}", threads_state);
+                println!("Warp {}: priority = {}", work_item.warp_id, priority);
+                work_queue.push(WorkItem {
+                    priority,
+                    sm_id: work_item.sm_id,
+                    warp_id: work_item.warp_id,
+                });
             }
         }
     }

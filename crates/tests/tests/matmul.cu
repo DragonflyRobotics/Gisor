@@ -85,65 +85,65 @@ void print_matrix(float *mat, int N, const char *name)
 
 int main()
 {
-    const int N = 64;  // Matrix size NxN
-    const int bytes = N * N * sizeof(float);
+    // const int N = 64;  // Matrix size NxN
+    // const int bytes = N * N * sizeof(float);
     
-    float *h_A = (float*)malloc(bytes);
-    float *h_B = (float*)malloc(bytes);
-    float *h_C = (float*)malloc(bytes);
+    // float *h_A = (float*)malloc(bytes);
+    // float *h_B = (float*)malloc(bytes);
+    // float *h_C = (float*)malloc(bytes);
     
-    // Initialize matrices
-    init_matrix(h_A, N, 123);
-    init_matrix(h_B, N, 456);
+    // // Initialize matrices
+    // init_matrix(h_A, N, 123);
+    // init_matrix(h_B, N, 456);
     
-    printf("Matrix multiplication: C = A × B\n");
-    printf("Matrix size: %dx%d\n\n", N, N);
+    // printf("Matrix multiplication: C = A × B\n");
+    // printf("Matrix size: %dx%d\n\n", N, N);
     
-    print_matrix(h_A, N, "Matrix A (top-left)");
-    print_matrix(h_B, N, "Matrix B (top-left)");
+    // print_matrix(h_A, N, "Matrix A (top-left)");
+    // print_matrix(h_B, N, "Matrix B (top-left)");
     
-    float *d_A, *d_B, *d_C;
-    cudaMalloc(&d_A, bytes);
-    cudaMalloc(&d_B, bytes);
-    cudaMalloc(&d_C, bytes);
+    // float *d_A, *d_B, *d_C;
+    // cudaMalloc(&d_A, bytes);
+    // cudaMalloc(&d_B, bytes);
+    // cudaMalloc(&d_C, bytes);
     
-    cudaMemcpy(d_A, h_A, bytes, cudaMemcpyHostToDevice);
-    cudaMemcpy(d_B, h_B, bytes, cudaMemcpyHostToDevice);
+    // cudaMemcpy(d_A, h_A, bytes, cudaMemcpyHostToDevice);
+    // cudaMemcpy(d_B, h_B, bytes, cudaMemcpyHostToDevice);
     
-    dim3 blockSize(TILE_SIZE, TILE_SIZE);
-    dim3 gridSize((N + TILE_SIZE - 1) / TILE_SIZE, 
-                  (N + TILE_SIZE - 1) / TILE_SIZE);
+    // dim3 blockSize(TILE_SIZE, TILE_SIZE);
+    // dim3 gridSize((N + TILE_SIZE - 1) / TILE_SIZE, 
+    //               (N + TILE_SIZE - 1) / TILE_SIZE);
     
-    printf("Launching kernel with:\n");
-    printf("  Grid: %dx%d blocks\n", gridSize.x, gridSize.y);
-    printf("  Block: %dx%d threads\n", blockSize.x, blockSize.y);
-    printf("  Total threads: %d\n\n", 
-           gridSize.x * gridSize.y * blockSize.x * blockSize.y);
+    // printf("Launching kernel with:\n");
+    // printf("  Grid: %dx%d blocks\n", gridSize.x, gridSize.y);
+    // printf("  Block: %dx%d threads\n", blockSize.x, blockSize.y);
+    // printf("  Total threads: %d\n\n", 
+    //        gridSize.x * gridSize.y * blockSize.x * blockSize.y);
     
-    // Run tiled version
-    matmul_tiled<<<gridSize, blockSize>>>(d_A, d_B, d_C, N);
-    cudaDeviceSynchronize();
+    // // Run tiled version
+    // matmul_tiled<<<gridSize, blockSize>>>(d_A, d_B, d_C, N);
+    // cudaDeviceSynchronize();
     
-    cudaMemcpy(h_C, d_C, bytes, cudaMemcpyDeviceToHost);
+    // cudaMemcpy(h_C, d_C, bytes, cudaMemcpyDeviceToHost);
     
-    print_matrix(h_C, N, "Result C = A × B (top-left)");
+    // print_matrix(h_C, N, "Result C = A × B (top-left)");
     
-    // Verify correctness with a few elements
-    printf("Verification (checking element C[0][0]):\n");
-    float expected = 0.0f;
-    for (int k = 0; k < N; k++) {
-        expected += h_A[0 * N + k] * h_B[k * N + 0];
-    }
-    printf("  Expected: %.1f\n", expected);
-    printf("  Got:      %.1f\n", h_C[0]);
-    printf("  %s\n\n", (fabs(expected - h_C[0]) < 0.01f) ? "PASS" : "FAIL");
+    // // Verify correctness with a few elements
+    // printf("Verification (checking element C[0][0]):\n");
+    // float expected = 0.0f;
+    // for (int k = 0; k < N; k++) {
+    //     expected += h_A[0 * N + k] * h_B[k * N + 0];
+    // }
+    // printf("  Expected: %.1f\n", expected);
+    // printf("  Got:      %.1f\n", h_C[0]);
+    // printf("  %s\n\n", (fabs(expected - h_C[0]) < 0.01f) ? "PASS" : "FAIL");
     
-    cudaFree(d_A);
-    cudaFree(d_B);
-    cudaFree(d_C);
-    free(h_A);
-    free(h_B);
-    free(h_C);
+    // cudaFree(d_A);
+    // cudaFree(d_B);
+    // cudaFree(d_C);
+    // free(h_A);
+    // free(h_B);
+    // free(h_C);
     
     return 0;
 }

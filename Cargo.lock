@@ -37,9 +37,9 @@ checksum = "5d20789868f4b01b2f2caec9f5c4e0213b41e3e5702a50157d699ae31ced2fcb"
 
 [[package]]
 name = "cc"
-version = "1.2.60"
+version = "1.2.61"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "43c5703da9466b66a946814e1adf53ea2c90f10063b86290cc9eb67ce3478a20"
+checksum = "d16d90359e986641506914ba71350897565610e87ce0ad9e6f28569db3dd5c6d"
 dependencies = [
  "find-msvc-tools",
  "shlex",
@@ -403,6 +403,7 @@ dependencies = [
 name = "ptx_parser"
 version = "0.1.0"
 dependencies = [
+ "cc",
  "gpu",
  "logos 0.14.4",
 ]
@@ -568,10 +569,6 @@ checksum = "81e544489bf3d8ef66c953931f56617f423cd4b5494be343d9b9d3dda037b9a3"
 
 [[package]]
 name = "utils"
-version = "0.1.0"
-
-[[package]]
-name = "warp_scheduler"
 version = "0.1.0"
 
 [[package]]

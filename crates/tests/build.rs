@@ -10,7 +10,7 @@ fn main() {
         .join("target")
         .join(&profile);
 
-    // Determine CUDA include/lib paths
+    // Hunt CUDA include/lib paths
     let cuda_path = env::var("CUDA_HOME")
         .or_else(|_| env::var("CUDA_PATH"))
         .unwrap();
@@ -18,21 +18,20 @@ fn main() {
     let cuda_include = format!("{}/include", cuda_path);
     let cuda_lib64 = format!("{}/lib64", cuda_path);
 
-    // Tell Cargo where to find native libraries
+    // Tell Cargo where to find native libraries if we link cudart
     println!("cargo:rustc-link-search=native={}", cuda_lib64);
     println!("cargo:rustc-link-search=native={}", target_path.to_str().unwrap());
 
-    // Link with CUDA runtime
+    // Link with runtime
     println!("cargo:rustc-link-lib=dylib=cudart");
 
-    // Optional: embed rpath so the binary can find CUDA and your libs at runtime
     println!("cargo:rustc-link-arg=-Wl,-rpath,{}", cuda_lib64);
     println!("cargo:rustc-link-arg=-Wl,-rpath,{}", target_path.to_str().unwrap());
 
-    // Include headers for any build scripts or bindings (if using bindgen)
+    // Include headers for safe measure
     println!("cargo:include={}", cuda_include);
 
-    // Re-run build.rs if these paths change
+    // Rerun build.rs if these paths change
     println!("cargo:rerun-if-changed={}", cuda_include);
     println!("cargo:rerun-if-changed={}", cuda_lib64);
     println!("cargo:rerun-if-changed={}", target_path.to_str().unwrap());
