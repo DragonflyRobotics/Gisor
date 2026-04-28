@@ -1,7 +1,4 @@
-use std::{
-    collections::{BinaryHeap, HashMap, VecDeque},
-    sync::Mutex,
-};
+use std::{collections::HashMap, sync::{Arc, Mutex}};
 
 use csv::Writer;
 use memory::{Memory, MemoryAddress, MemoryElement};
@@ -14,26 +11,8 @@ use crate::{
     execute_unit::ExecuteUnitClass,
     inst_info::inst_info,
     sm::SM,
-    warp::{Warp, WarpState},
+    warp::WarpState,
 };
-
-#[derive(PartialEq, Eq, Clone, Debug)]
-struct WorkItem {
-    priority: usize,
-    sm_id: usize,
-    warp_id: usize,
-}
-
-impl Ord for WorkItem {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.priority.cmp(&other.priority)
-    }
-}
-impl PartialOrd for WorkItem {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.cmp(other))
-    }
-}
 
 #[derive(Serialize)]
 struct ThreadRecord {
@@ -67,11 +46,13 @@ pub struct LaunchParams {
 pub struct GPU {
     pub memory: Memory,
     pub sms: Vec<SM>,
+    scheduled_warps: Vec<(usize, usize)>,
     pub kernel_symbol: Option<String>,
     launch_params: Option<LaunchParams>,
     raw_ptx: Option<String>,
     pub num_args: Option<usize>,
     pub kernels: HashMap<String, Vec<inst_info>>,
+    next_sm_hint: usize,
 }
 
 impl BasicGPU for GPU {
@@ -105,6 +86,8 @@ impl BasicGPU for GPU {
             block: (threads.x, threads.y, threads.z),
         });
 
+        self.scheduled_warps.clear();
+
         let gridx = 0..grid.x;
         let gridy = 0..grid.y;
         let gridz = 0..grid.z;
@@ -120,17 +103,10 @@ impl BasicGPU for GPU {
             ((threads.x as f32 * threads.y as f32 * threads.z as f32) / 32.0).ceil() as usize;
 
         for block in grid_zip {
-            // find suitable SM
-            let mut selected_warps: Option<Vec<&mut Warp>> = None;
-            for sm in self.sms.iter_mut() {
-                let candidate = sm.get_free_warps(warps_needed);
-                if candidate.is_some() {
-                    selected_warps = candidate;
-                    break;
-                }
-            }
-            if let Some(mut warps) = selected_warps {
-                for (warp_threads, warp) in threads_zip.chunks(32).zip(warps.iter_mut()) {
+            let selected = self.reserve_sms_for_block(warps_needed);
+            if let Some((smi, warp_ids)) = selected {
+                for (warp_threads, warpi) in threads_zip.chunks(32).zip(warp_ids.iter()) {
+                    let warp = &mut self.sms[smi].warps[*warpi];
                     warp.set_state(WarpState::Active);
                     warp.set_coords(
                         block,
@@ -139,6 +115,7 @@ impl BasicGPU for GPU {
                             .map(|t| (t.0, t.1, t.2))
                             .collect::<Vec<_>>(),
                     );
+                    self.scheduled_warps.push((smi, *warpi));
                 }
             } else {
                 println!("No free warps available for block {:?}", block);
@@ -174,11 +151,11 @@ impl BasicGPU for GPU {
     }
 
     fn execute(&mut self, args: Vec<usize>) {
-        let insts = self
+        let insts = Arc::new(self
             .kernels
             .get(self.kernel_symbol.as_deref().unwrap())
             .unwrap()
-            .clone();
+            .clone());
         self.num_args = Some(args.len());
 
         let mut active_warps = self.prepare_active_warps(&insts);
@@ -203,38 +180,64 @@ impl BasicGPU for GPU {
 
             active_warps
                 .retain(|&(smi, warpi)| self.sms[smi].warps[warpi].state == WarpState::Active);
-            println!("Active warps: {}", active_warps.len());
         }
     }
 }
 
 impl GPU {
-    fn prepare_active_warps(&mut self, insts: &Vec<inst_info>) -> Vec<(usize, usize)> {
+    fn reserve_sms_for_block(&mut self, warps_needed: usize) -> Option<(usize, Vec<usize>)> {
+        if self.sms.is_empty() {
+            return None;
+        }
+
+        let search_window = self.sms.len().min(8);
+        for offset in 0..search_window {
+            let smi = (self.next_sm_hint + offset) % self.sms.len();
+            if self.sms[smi].can_reserve_warps(warps_needed) {
+                if let Some(warp_ids) = self.sms[smi].reserve_free_warps(warps_needed) {
+                    self.next_sm_hint = (smi + 1) % self.sms.len();
+                    return Some((smi, warp_ids));
+                }
+            }
+        }
+
+        for smi in 0..self.sms.len() {
+            if self.sms[smi].can_reserve_warps(warps_needed) {
+                if let Some(warp_ids) = self.sms[smi].reserve_free_warps(warps_needed) {
+                    self.next_sm_hint = (smi + 1) % self.sms.len();
+                    return Some((smi, warp_ids));
+                }
+            }
+        }
+
+        None
+    }
+
+    fn prepare_active_warps(&mut self, insts: &Arc<Vec<inst_info>>) -> Vec<(usize, usize)> {
         let mut active_warps: Vec<(usize, usize)> = Vec::new();
         let launch_params = self.launch_params.as_ref().unwrap();
 
-        for (smi, sm) in self.sms.iter_mut().enumerate() {
-            for (warpi, warp) in sm.warps.iter_mut().enumerate() {
-                if warp.state == WarpState::Active {
-                    for thread in warp.threads.iter_mut() {
-                        thread.execute_unit.set_execute_id(
-                            thread.threads_pos.x,
-                            thread.threads_pos.y,
-                            thread.threads_pos.z,
-                            thread.grid_pos.x,
-                            thread.grid_pos.y,
-                            thread.grid_pos.z,
-                            launch_params.block.0,
-                            launch_params.block.1,
-                            launch_params.block.2,
-                            launch_params.grid.0,
-                            launch_params.grid.1,
-                            launch_params.grid.2,
-                        );
-                        thread.execute_unit.import_inst(insts.clone());
-                    }
-                    active_warps.push((smi, warpi));
+        for &(smi, warpi) in &self.scheduled_warps {
+            let warp = &mut self.sms[smi].warps[warpi];
+            if warp.state == WarpState::Active {
+                for thread in warp.threads.iter_mut() {
+                    thread.execute_unit.set_execute_id(
+                        thread.threads_pos.x,
+                        thread.threads_pos.y,
+                        thread.threads_pos.z,
+                        thread.grid_pos.x,
+                        thread.grid_pos.y,
+                        thread.grid_pos.z,
+                        launch_params.block.0,
+                        launch_params.block.1,
+                        launch_params.block.2,
+                        launch_params.grid.0,
+                        launch_params.grid.1,
+                        launch_params.grid.2,
+                    );
+                    thread.execute_unit.import_inst(Arc::clone(insts));
                 }
+                active_warps.push((smi, warpi));
             }
         }
         active_warps
@@ -282,9 +285,6 @@ impl GPU {
 
         if threads_state.iter().all(|&t| t) {
             warp.state = WarpState::InActive;
-            active_warps
-                .to_vec()
-                .retain(|&(a, b)| !(a == smi && b == warpi));
         }
 
         true
@@ -307,10 +307,12 @@ pub static GPU0: Lazy<Mutex<GPU>> = Lazy::new(|| {
             sizes: HashMap::new(),
         },
         sms: std::iter::repeat_with(|| SM::new(100)).take(120).collect(),
+        scheduled_warps: Vec::new(),
         kernel_symbol: None,
         launch_params: None,
         raw_ptx: None,
         num_args: None,
         kernels: HashMap::new(),
+        next_sm_hint: 0,
     })
 });

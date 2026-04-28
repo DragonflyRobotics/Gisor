@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use memory::{Memory, MemoryAddress};
 use crate::inst_type::InstType;
 use crate::inst_info::inst_info;
@@ -35,7 +37,7 @@ pub struct execute_unit {
     pc: u32, // cur inst running
     total_number_inst: u32,
 
-    inst_list: Vec<inst_info>,
+    inst_list: Arc<Vec<inst_info>>,
     branch_is_taken: bool,
 }
 
@@ -66,7 +68,7 @@ impl Default for execute_unit {
             pc: 0,
             total_number_inst: 0,
 
-            inst_list: Vec::new(),
+            inst_list: Arc::new(Vec::new()),
             branch_is_taken: false,
         }
     }
@@ -111,7 +113,7 @@ impl execute_unit {
             pc: 0,
             total_number_inst: 0,
 
-            inst_list: Vec::new(),
+            inst_list: Arc::new(Vec::new()),
             branch_is_taken: false,
         }
     }
@@ -142,7 +144,7 @@ impl execute_unit {
         self.nctaid_z = nctaid_z;
     }
 
-    pub fn import_inst(&mut self, instructions: Vec<inst_info>) {
+    pub fn import_inst(&mut self, instructions: Arc<Vec<inst_info>>) {
         self.inst_list = instructions;
         self.total_number_inst = self.inst_list.len() as u32;
         self.pc = 0;
