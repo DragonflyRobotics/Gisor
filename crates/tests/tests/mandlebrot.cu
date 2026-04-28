@@ -4,7 +4,7 @@
 
 #define WIDTH 64
 #define HEIGHT 64
-#define MAX_ITER 256
+#define MAX_ITER 64
 
 __global__ void mandelbrot_kernel(int *output, int width, int height, 
                                    float x_min, float x_max, 

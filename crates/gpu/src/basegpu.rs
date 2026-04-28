@@ -161,6 +161,8 @@ impl BasicGPU for GPU {
         let mut active_warps = self.prepare_active_warps(&insts);
 
         while !active_warps.is_empty() {
+            // println!("{}", active_warps.len());
+
             let mut ran_warp = false;
 
             for unit_class in [
