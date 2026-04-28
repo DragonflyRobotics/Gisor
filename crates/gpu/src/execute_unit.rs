@@ -253,7 +253,7 @@ impl execute_unit {
 
     fn execute_in_seq(&mut self, mem: &mut Memory, args: Vec<usize>) {
         let inst = self.inst_list[self.pc as usize].clone();
-        println!("Inst: {:?}", inst);
+        // println!("Inst: {:?}", inst);
         self.execute_single_inst(inst, mem, args);
     }
     
