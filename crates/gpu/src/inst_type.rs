@@ -1,4 +1,5 @@
-#[derive(Default, Clone, Debug)]
+#[derive(Default, Clone, Copy, Debug)]
+#[repr(C)]
 pub enum InstType {
     #[default]
     NoOp,

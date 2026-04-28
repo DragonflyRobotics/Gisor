@@ -8,7 +8,7 @@ use cpp_demangle::Symbol;
 use gpu::basegpu::{BasicGPU, GPU0};
 use memory::MemoryAddress;
 use nvtypes::{CUresult, CUstream, dim3, uint3};
-use ptx_parser::{parse, parse_c_signature};
+use ptx_parser::{parse, parse_rust_signature};
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn __cudaLaunchKernel(
@@ -31,7 +31,7 @@ pub unsafe extern "C" fn __cudaLaunchKernel(
         "Device demangled function: {:?}",
         sym.demangle().unwrap().to_string()
     );
-    let csig = parse_c_signature(sym.demangle().unwrap().as_str()).unwrap();
+    let csig = parse_rust_signature(sym.demangle().unwrap().as_str());
     unsafe {
         for (i, param) in csig.params.iter().enumerate() {
             if (param.pointer_levels > 0) {
@@ -125,32 +125,18 @@ pub unsafe extern "C" fn __cudaRegisterFunction(
     unsafe {
         println!("Host function: {:?}", CStr::from_ptr(deviceFun));
         let parsed = parse(ptx.as_str());
-        match parsed {
-            Ok(parsed) => {
-                gpu.kernels.insert(
-                    CStr::from_ptr(deviceFun).to_string_lossy().to_string(),
-                    parsed.instructions,
-                );
-            }
-            Err(err) => {
-                panic!("Parse error: {:?}", err);
-            }
-        }
+        gpu.kernels.insert(
+            CStr::from_ptr(deviceFun).to_string_lossy().to_string(),
+            parsed,
+        );
         gpu.select_kernel(CStr::from_ptr(deviceFun).to_string_lossy().to_string());
         let sym = Symbol::new(CStr::from_ptr(deviceFun).to_str().unwrap()).unwrap();
         println!(
             "Device demangled function: {:?}",
             sym.demangle().unwrap().to_string()
         );
-        let csig = parse_c_signature(sym.demangle().unwrap().as_str());
-        match csig {
-            Ok(csig) => {
-                gpu.num_args = Some(csig.params.len());
-            }
-            Err(err) => {
-                panic!("Parse error: {:?}", err);
-            }
-        }
+        let csig = parse_rust_signature(sym.demangle().unwrap().as_str());
+        gpu.num_args = Some(csig.params.len());
         // println!("TID: {:?}", *tid);
         // println!("BID: {:?}", *bid);
         // println!("Block Dim: {:?}", *bDim);

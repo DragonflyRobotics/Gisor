@@ -1,14 +1,13 @@
-// pub mod parser;
-// pub use parser::{parse, parse_c_signature, ParseError, ParsedKernel, ParamInfo, PtxType, inst_info, InstType};
+use std::{ffi::{CString, c_char}, ops::Add};
 
-use libc::{c_char, int64_t, uint32_t};
-use gpu::inst_type::InstType;
+use gpu::{inst_info::inst_info, inst_type::InstType};
 
 const MAX_INST_ARGS: usize = 8;
 const MAX_OPERANDS: usize  = 8;
 const MAX_MODIFIERS: usize = 4;
+
 #[repr(C)]
-enum RegBank {
+pub enum RegBank {
     REG_BANK_P,
     REG_BANK_R,
     REG_BANK_RD,
@@ -16,7 +15,7 @@ enum RegBank {
 }
 
 #[repr(C)]
-enum SpecialReg {
+pub enum SpecialReg {
     SREG_TID_X,
     SREG_TID_Y,
     SREG_TID_Z,
@@ -32,19 +31,20 @@ enum SpecialReg {
 }
 
 #[repr(C)]
-enum PtxType {
-    PTX_TYPE_U32,
-    PTX_TYPE_U64,
-    PTX_TYPE_S32,
-    PTX_TYPE_S64,
-    PTX_TYPE_F32,
-    PTX_TYPE_B32,
-    PTX_TYPE_B64,
-    PTX_TYPE_PRED,
+#[derive(Debug, Clone, Copy)]
+pub enum PtxType {
+    U32,
+    U64,
+    S32,
+    S64,
+    F32,
+    B32,
+    B64,
+    Pred,
 }
 
 #[repr(C)]
-enum TokenType {
+pub enum TokenType {
     TOK_COMMA,
     TOK_SEMICOLON,
     TOK_COLON,
@@ -68,41 +68,41 @@ enum TokenType {
 }
 
 #[repr(C)]
-union TokenData {
+pub union TokenData {
     text: *const c_char,
     int_val: i64,
     u32_val: u32,
 }
 
 #[repr(C)]
-struct Token {
+pub struct Token {
     token_type: TokenType,
     data: TokenData,
     line: usize,
 }
 
 #[repr(C)]
-enum ImmType {
+pub enum ImmType {
     IMM_INT_ZERO,
     IMM_INT,
     IMM_F32_BITS,
 }
 
 #[repr(C)]
-union ImmData {
+pub union ImmData {
     text: *const c_char,
     int_val: i64,
     u32_val: u32,
 }
 
 #[repr(C)]
-struct ImmValue {
+pub struct ImmValue {
     imm_type: ImmType,
     imm_data: ImmData,
 }
 
 #[repr(C)]
-enum RawOperandType {
+pub enum RawOperandType {
     RAW_OP_REGISTER,
     RAW_OP_SPECIAL_REG,
     RAW_OP_IMMEDIATE,
@@ -112,13 +112,13 @@ enum RawOperandType {
 }
 
 #[repr(C)]
-struct reg {
+pub struct reg {
     bank: RegBank,
     index: u32,
 }
 
 #[repr(C)]
-union RawOperandData {
+pub union RawOperandData {
     reg: std::mem::ManuallyDrop<reg>,
     special_reg: std::mem::ManuallyDrop<SpecialReg>,
     imm: std::mem::ManuallyDrop<ImmValue>,
@@ -128,19 +128,19 @@ union RawOperandData {
 }
 
 #[repr(C)]
-struct RawOperand {
+pub struct RawOperand {
     raw_operand_type: RawOperandType,
     raw_operand_data: RawOperandData,
 }
 
 #[repr(C)]
-struct PredGuard {
+pub struct PredGuard {
     reg: u32,
     negated: bool,
 }
 
 #[repr(C)]
-struct RawInstruction {
+pub struct RawInstruction {
     has_guard: bool,
     guard: PredGuard,
     instr_name: *const c_char,
@@ -152,30 +152,91 @@ struct RawInstruction {
 }
 
 #[repr(C)]
-struct ParamInfo {
+pub struct ParamInfo {
     name: *const c_char,
     ptx_type: PtxType,
 }
 
 #[repr(C)]
-struct SignatureParam {
+#[derive(Debug, Clone, Copy)]
+pub struct SignatureParam {
     name: *const c_char,
-    ptx_type: PtxType,
-    pointer_levels: u8,
+    pub ptx_type: PtxType,
+    pub pointer_levels: u8,
 }
 
 #[repr(C)]
-struct InstInfo {
+#[derive(Debug, Clone, Copy)]
+pub struct InstInfo {
     opcode: InstType,
     args: [usize; MAX_INST_ARGS],
     arg_count: usize,
 }
 
 #[repr(C)]
-struct ParsedKernel {
+pub struct ParsedKernel {
     name: *const c_char,
     params: *const ParamInfo,
     param_count: usize,
     instructions: *const InstInfo,
     instruction_count: usize,
+}
+
+#[repr(C)]
+pub struct ParsedSignature {
+    name: *const c_char,
+    params: *const SignatureParam,
+    param_count: usize,
+}
+
+pub struct ParsedSignatureRust {
+    pub name: String,
+    pub params: Vec<SignatureParam>,
+}
+
+unsafe extern "C" {
+    pub fn ptx_parse(source: *const c_char) -> ParsedKernel;
+    fn parse_c_signature(source: *const c_char) -> ParsedSignature;
+}
+
+pub fn translate(parsed: ParsedKernel) -> Vec<inst_info> {
+    let mut inst: Vec<inst_info> = Vec::new();
+    unsafe {
+        for i in 0..parsed.instruction_count {
+            let c = *(parsed.instructions.add(i));
+            let args = c.args[..c.arg_count].to_vec();
+            let rust = inst_info {
+                inst_type: c.opcode,
+                args: args,
+            };
+            inst.push(rust);
+        }
+    }
+    inst
+}
+
+pub fn parse_rust_signature(name: &str) -> ParsedSignatureRust {
+    unsafe {
+        let parsed_c = parse_c_signature(CString::new(name).unwrap().as_ptr());
+        let mut signatures: Vec<SignatureParam> = Vec::new();
+        for i in 0..parsed_c.param_count {
+            signatures.push(*parsed_c.params.add(i));
+        }
+        let name = CString::from_raw(parsed_c.name as *mut i8);
+        ParsedSignatureRust {
+            name: String::from_utf8_lossy(name.as_bytes()).to_string(),
+            params: signatures,
+        }
+    }
+}
+
+pub fn parse(source: &str) -> Vec<inst_info> {
+    let c_str = CString::new(source).unwrap();
+    let parsed = unsafe { ptx_parse(c_str.as_ptr()) };
+    let res = translate(parsed);
+    // for ins in &res {
+    //     println!("Inst: {:?}", ins);
+    // }
+    // panic!("KYS");
+    res
 }

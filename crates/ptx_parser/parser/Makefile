@@ -1,5 +1,5 @@
 CFLAGS = -Wall -Wextra -O2 -g
-SRCS = arena.c lexer.c parser.c lowering.c output.c main.c
+SRCS = arena.c lexer.c parser.c lowering.c output.c main.c c_signature.c types.c
 OBJS = $(SRCS:.c=.o)
 
 ptx_test: $(OBJS)
