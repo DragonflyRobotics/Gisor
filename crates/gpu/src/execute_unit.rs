@@ -281,7 +281,7 @@ impl execute_unit {
             return true;
         }
         self.execute_in_seq(mem, args.clone());
-        println!("pc: {} | total: {}", self.pc, self.total_number_inst);
+        // println!("pc: {} | total: {}", self.pc, self.total_number_inst);
         false
     }
 
