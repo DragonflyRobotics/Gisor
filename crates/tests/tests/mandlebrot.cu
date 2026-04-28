@@ -2,8 +2,8 @@
 #include <stdio.h>
 #include <cuda_runtime.h>
 
-#define WIDTH 640
-#define HEIGHT 480
+#define WIDTH 64
+#define HEIGHT 64
 #define MAX_ITER 256
 
 __global__ void mandelbrot_kernel(int *output, int width, int height, 

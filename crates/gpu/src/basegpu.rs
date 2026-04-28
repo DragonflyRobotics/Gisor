@@ -3,10 +3,7 @@ use std::{
     sync::Mutex,
 };
 
-use crate::inst_type::InstType;
-use crate::{inst_info::make_inst, warp};
 use csv::Writer;
-use indicatif::{ProgressBar, ProgressStyle};
 use memory::{Memory, MemoryAddress, MemoryElement};
 use nvtypes::dim3;
 use once_cell::sync::Lazy;
@@ -14,6 +11,7 @@ use serde::Serialize;
 use utils::triple_zip;
 
 use crate::{
+    execute_unit::ExecuteUnitClass,
     inst_info::inst_info,
     sm::SM,
     warp::{Warp, WarpState},
@@ -179,9 +177,42 @@ impl BasicGPU for GPU {
         let insts = self
             .kernels
             .get(self.kernel_symbol.as_deref().unwrap())
-            .unwrap();
+            .unwrap()
+            .clone();
         self.num_args = Some(args.len());
-        let mut work_queue: BinaryHeap<WorkItem> = BinaryHeap::new();
+
+        let mut active_warps = self.prepare_active_warps(&insts);
+
+        while !active_warps.is_empty() {
+            let mut ran_warp = false;
+
+            for unit_class in [
+                ExecuteUnitClass::Special,
+                ExecuteUnitClass::Memory,
+                ExecuteUnitClass::Generic,
+            ] {
+                if self.execute_best_class_warp(&active_warps, unit_class, &args) {
+                    ran_warp = true;
+                    break;
+                }
+            }
+
+            if !ran_warp {
+                break;
+            }
+
+            active_warps
+                .retain(|&(smi, warpi)| self.sms[smi].warps[warpi].state == WarpState::Active);
+            println!("Active warps: {}", active_warps.len());
+        }
+    }
+}
+
+impl GPU {
+    fn prepare_active_warps(&mut self, insts: &Vec<inst_info>) -> Vec<(usize, usize)> {
+        let mut active_warps: Vec<(usize, usize)> = Vec::new();
+        let launch_params = self.launch_params.as_ref().unwrap();
+
         for (smi, sm) in self.sms.iter_mut().enumerate() {
             for (warpi, warp) in sm.warps.iter_mut().enumerate() {
                 if warp.state == WarpState::Active {
@@ -193,50 +224,70 @@ impl BasicGPU for GPU {
                             thread.grid_pos.x,
                             thread.grid_pos.y,
                             thread.grid_pos.z,
-                            self.launch_params.as_ref().unwrap().block.0,
-                            self.launch_params.as_ref().unwrap().block.1,
-                            self.launch_params.as_ref().unwrap().block.2,
-                            self.launch_params.as_ref().unwrap().grid.0,
-                            self.launch_params.as_ref().unwrap().grid.1,
-                            self.launch_params.as_ref().unwrap().grid.2,
+                            launch_params.block.0,
+                            launch_params.block.1,
+                            launch_params.block.2,
+                            launch_params.grid.0,
+                            launch_params.grid.1,
+                            launch_params.grid.2,
                         );
                         thread.execute_unit.import_inst(insts.clone());
                     }
-                    work_queue.push(WorkItem {
-                        priority: 1,
-                        sm_id: smi,
-                        warp_id: warpi,
-                    });
+                    active_warps.push((smi, warpi));
                 }
             }
         }
-        while !work_queue.is_empty() {
-            println!("Work queue: {:?}", work_queue.len());
-            let work_item = work_queue.pop().unwrap();
-            let warp = &mut self.sms[work_item.sm_id].warps[work_item.warp_id];
-            let mut threads_state: [bool; 32] = [false; 32];
-            // I wish i could multithread this but &mut Mem is not Send
-            // Making it mutex would defeat point.
-            // Use DashMap later?????
-            for (i, thread) in warp.threads.iter_mut().enumerate() {
-                let done_t = thread
-                    .execute_unit
-                    .execute_clock(&mut self.memory, args.clone());
-                threads_state[i] = done_t;
+        active_warps
+    }
+
+    fn execute_best_class_warp(
+        &mut self,
+        active_warps: &[(usize, usize)],
+        unit_class: ExecuteUnitClass,
+        args: &Vec<usize>,
+    ) -> bool {
+        let mut scored: Vec<(usize, usize, usize, usize)> = Vec::new();
+        let class_pri = if unit_class == ExecuteUnitClass::Special {
+            0usize
+        } else if unit_class == ExecuteUnitClass::Memory {
+            1usize
+        } else {
+            2usize
+        };
+
+        for &(smi, warpi) in active_warps {
+            let warp = &self.sms[smi].warps[warpi];
+            if warp.next_execute_unit_class() != Some(unit_class) {
+                continue;
             }
-            if threads_state.iter().all(|&t| t) {
-                warp.state = WarpState::InActive;
-            } else {
-                let priority = threads_state.iter().filter(|&t| *t == true).count();
-                println!("{:?}", threads_state);
-                println!("Warp {}: priority = {}", work_item.warp_id, priority);
-                work_queue.push(WorkItem {
-                    priority,
-                    sm_id: work_item.sm_id,
-                    warp_id: work_item.warp_id,
-                });
-            }
+            scored.push((smi, warpi, class_pri, warp.divergence_score()));
         }
+
+        if scored.is_empty() {
+            return false;
+        }
+
+        warp_scheduler::prioritize(&mut scored);
+
+        let (smi, warpi, _, _) = scored[0];
+
+        let warp = &mut self.sms[smi].warps[warpi];
+        let mut threads_state: [bool; 32] = [false; 32];
+        for (i, thread) in warp.threads.iter_mut().enumerate() {
+            let done_t = thread
+                .execute_unit
+                .execute_clock(&mut self.memory, args.clone());
+            threads_state[i] = done_t;
+        }
+
+        if threads_state.iter().all(|&t| t) {
+            warp.state = WarpState::InActive;
+            active_warps
+                .to_vec()
+                .retain(|&(a, b)| !(a == smi && b == warpi));
+        }
+
+        true
     }
 }
 
@@ -255,7 +306,7 @@ pub static GPU0: Lazy<Mutex<GPU>> = Lazy::new(|| {
             data: HashMap::new(),
             sizes: HashMap::new(),
         },
-        sms: std::iter::repeat_with(|| SM::new(1000)).take(120).collect(),
+        sms: std::iter::repeat_with(|| SM::new(100)).take(120).collect(),
         kernel_symbol: None,
         launch_params: None,
         raw_ptx: None,
