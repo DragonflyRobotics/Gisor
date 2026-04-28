@@ -1,6 +1,6 @@
 use crate::execute_unit::ExecuteUnitClass;
 
-#[derive(Default, Clone, Debug)]
+#[derive(Default, Clone, Copy, Debug)]
 pub enum InstType {
     #[default]
     NoOp,

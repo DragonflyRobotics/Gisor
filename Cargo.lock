@@ -359,6 +359,7 @@ dependencies = [
 name = "ptx_parser"
 version = "0.1.0"
 dependencies = [
+ "cc",
  "gpu",
 ]
 
