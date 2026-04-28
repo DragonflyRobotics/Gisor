@@ -391,10 +391,11 @@ static InstInfo lower_mul(const RawInstruction* r) {
         return i;
     }
     if (r->modifier_count == 2 && !strcmp(r->modifiers[0], "wide")  && !strcmp(r->modifiers[1], "s32")) {
+        const RawOperand* b = &r->operands[2];
         i.opcode = MulWideS32;
         i.args[0] = dst;
         i.args[1] = a;
-        i.args[2] = b;
+        i.args[2] = imm_to_usize(&b->data.imm);
         i.arg_count = 3;
         return i;
     }
@@ -452,7 +453,7 @@ static InstInfo lower_setp(const RawInstruction* r) {
             i.opcode = SetpEqB32;
             i.args[0] = dst;
             i.args[1] = a;
-            i.args[2] = (size_t)b->data.reg.index;
+            i.args[2] = imm_to_usize(&b->data.imm);
             i.arg_count = 3;
             return i;
         }
